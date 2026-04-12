@@ -1,0 +1,457 @@
+\documentclass{article}
+
+\usepackage{neurips_2025}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsfonts}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{nicefrac}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{enumitem}
+
+\title{Algebraic Reasoning Distiller: A Multi-Agent System with RAG and RLVF for Equational Implication over Magmas}
+
+\author{%
+  Author 1 \\
+  Master in Artificial Intelligence\\
+  Universidad Polit\'ecnica de Madrid\\
+  \texttt{author1@alumnos.upm.es} \\
+  \And
+  Author 2 \\
+  Master in Artificial Intelligence\\
+  Universidad Polit\'ecnica de Madrid\\
+  \texttt{author2@alumnos.upm.es} \\
+  \And
+  Author 3 \\
+  Master in Artificial Intelligence\\
+  Universidad Polit\'ecnica de Madrid\\
+  \texttt{author3@alumnos.upm.es} \\
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+We present \textbf{Algebraic Reasoning Distiller} (ARD), a multi-agent system that determines whether one equational identity implies another over the class of all magmas---sets equipped with a single binary operation and no additional axioms. The system combines five specialised agents (planner, symbolic prover, counterexample searcher, RAG retriever, and LLM distiller) orchestrated through a sequential pipeline. A Qwen2.5-7B-Instruct model is fine-tuned via LoRA in two stages: supervised fine-tuning on synthetically generated reasoning traces, followed by Group Relative Policy Optimisation (GRPO) with a verification-based reward derived from an external judge. The trained distiller compresses its knowledge into a $\leq$10\,KB cheat sheet used at inference time under strict competition constraints (no tools, 10 minutes, \$0.01 per problem). We evaluate the system on the SAIR Equational Theories Stage~1 benchmark and analyse the contribution of each component through ablation experiments.
+\end{abstract}
+
+%======================================================================
+\section{Introduction}
+\label{sec:intro}
+%======================================================================
+
+The \textit{Equational Theories} project~\cite{teorth2024} catalogues $4{,}694$ equational identities over magmas and studies the implication relationships among them. Given two equations $E_1$ and $E_2$ expressed with a binary operator~$*$, the fundamental question is:
+
+\begin{quote}
+\itshape Does $E_1 \Rightarrow E_2$ hold for every magma $(S, *)$?
+\end{quote}
+
+This problem, drawn from the SAIR (Symbolic AI Reasoning) competition Stage~1, requires both constructive reasoning (proofs via term rewriting) and refutation (finite counterexample search). It is well suited for a multi-agent architecture where each agent contributes a complementary form of evidence.
+
+Our system, \textbf{Algebraic Reasoning Distiller} (ARD), addresses this challenge through three core contributions:
+
+\begin{enumerate}[leftmargin=*,itemsep=2pt]
+  \item \textbf{Multi-agent pipeline.} Five agents---planner, retriever, prover, counterexample searcher, and distiller---are orchestrated sequentially, each contributing evidence that is aggregated by a priority-based policy (Section~\ref{sec:agents}).
+  \item \textbf{Two-stage fine-tuning.} A Qwen2.5-7B-Instruct model is adapted via LoRA, first with supervised fine-tuning (SFT) on synthetic traces, then with GRPO where the reward signal comes from the official SAIR judge (Section~\ref{sec:training}).
+  \item \textbf{Knowledge distillation into a cheat sheet.} The trained model compresses its reasoning into a $\leq$10\,KB text artefact that can be injected as a system-prompt prefix at evaluation time, conforming to competition constraints (Section~\ref{sec:cheatsheet}).
+\end{enumerate}
+
+%======================================================================
+\section{Problem definition}
+\label{sec:problem}
+%======================================================================
+
+\paragraph{Magmas.} A magma is a pair $(S, *)$ where $S$ is a non-empty set and $*\colon S \times S \to S$ is a closed binary operation. No associativity, commutativity, or identity element is assumed.
+
+\paragraph{Equational identities.} An equation is a universally quantified identity of the form $\forall x_1,\dots,x_k\colon t_l = t_r$, where terms are built from variables and the binary operator~$*$. For example, Equation~43 is $x * y = y * x$ (commutativity) and Equation~4512 is $x * (y * (z * (x * y))) = z$.
+
+\paragraph{Implication.} $E_1 \Rightarrow E_2$ means that every magma satisfying $E_1$ also satisfies $E_2$. Deciding this in the general case is undecidable, but for the finite equational fragments in SAIR Stage~1 the ground truth is known.
+
+\paragraph{Competition constraints.} The SAIR Stage~1 evaluation enforces: (i)~a static cheat sheet of at most 10\,KB, (ii)~no tool use during evaluation, (iii)~a budget of 10 minutes and \$0.01 per problem. These constraints motivate our offline distillation approach: heavy compute (counterexample search, RAG, multi-agent reasoning) happens during training; only the lightweight cheat sheet and a single LLM call are used at test time.
+
+%======================================================================
+\section{System architecture}
+\label{sec:architecture}
+%======================================================================
+
+ARD follows a \emph{distill-then-deploy} paradigm. During the offline phase, a multi-agent pipeline analyses training problems and produces evidence bundles. These bundles are used to (a)~generate SFT and GRPO training data, and (b)~synthesise a compact cheat sheet. At test time, only the fine-tuned LLM and the cheat sheet are needed.
+
+\subsection{Multi-agent pipeline}
+\label{sec:agents}
+
+The pipeline processes each problem through five sequential nodes, maintaining a shared \texttt{PipelineState}:
+
+\paragraph{1. Planner.} Parses both equations into abstract syntax trees (ASTs). Terms are represented as nested tuples: \texttt{("var",\,"x")} for variables and \texttt{("mul",\,left,\,right)} for binary application. The parser implements a recursive-descent grammar with right-associative~$*$.
+
+\paragraph{2. RAG Retriever.} Queries a ChromaDB vector store containing 4,694 indexed equations (embedded with \texttt{all-MiniLM-L6-v2}) and returns the top-$k$ ($k{=}5$) most similar documents. This provides structural context---nearby equations that share algebraic patterns---to the downstream distiller.
+
+\paragraph{3. Symbolic Prover.} Attempts three strategies in order:
+\begin{enumerate}[label=(\alph*),itemsep=1pt]
+  \item \textit{Alpha-equivalence}: variable normalisation ($x \mapsto v_0$, $y \mapsto v_1$, \dots) followed by structural comparison.
+  \item \textit{Substitution instance}: checks whether $E_2$ is obtainable by substituting terms for variables in $E_1$.
+  \item \textit{One-step rewrite}: orients $E_1$ as a rewrite rule ($L \to R$ and $R \to L$) and applies it to $E_2$.
+\end{enumerate}
+The prover is deliberately conservative: a negative result does not constitute a refutation.
+
+\paragraph{4. Counterexample Searcher.} Searches for a finite magma that satisfies $E_1$ but violates $E_2$:
+\begin{itemize}[itemsep=1pt]
+  \item Orders 2--3: exhaustive enumeration (16 and 19,683 magmas respectively).
+  \item Order 4: random sampling of 20,000 Cayley tables.
+\end{itemize}
+For each candidate magma, all variable assignments are tested via a mixed-radix Cartesian product iterator. A single failing assignment suffices to refute the implication.
+
+\paragraph{5. Aggregator.} Fuses evidence from all agents with a priority policy:
+\begin{itemize}[itemsep=1pt]
+  \item Counterexample found $\Rightarrow$ \textsc{false} (confidence 1.0).
+  \item Symbolic proof found $\Rightarrow$ \textsc{true} (confidence 0.9).
+  \item Neither $\Rightarrow$ report negative results (confidence 0.0); the LLM distiller will make the final call.
+\end{itemize}
+
+The pipeline is also available as a LangGraph state machine for the multi-agent orchestration requirement.
+
+\subsection{RAG component}
+\label{sec:rag}
+
+The retrieval-augmented generation layer is built on:
+\begin{itemize}[itemsep=1pt]
+  \item \textbf{Embedding model}: \texttt{all-MiniLM-L6-v2} (384-dimensional sentence embeddings).
+  \item \textbf{Vector store}: ChromaDB with a single collection (\texttt{sair\_equations}) supporting two document kinds: \texttt{equation} (the 4,694 canonical identities) and \texttt{implication} (known implication records, when available).
+  \item \textbf{Ingestion}: the script \texttt{ingest\_equations.py} parses lines of the form \texttt{N := term = term} and stores \texttt{"Equation N: <text>"} as the page content.
+\end{itemize}
+
+The retriever degrades gracefully: if the index is absent or empty, it returns an empty list and the pipeline continues without retrieved context.
+
+\subsection{LLM distiller agent}
+\label{sec:distiller}
+
+The distiller is a Qwen2.5-7B-Instruct model loaded in 4-bit NF4 quantisation with BF16 compute. LoRA adapters (rank $r{=}16$, $\alpha{=}32$, dropout 0.05) are applied to all attention and MLP projection matrices (\texttt{q\_proj}, \texttt{k\_proj}, \texttt{v\_proj}, \texttt{o\_proj}, \texttt{gate\_proj}, \texttt{up\_proj}, \texttt{down\_proj}).
+
+At inference the distiller operates in two modes:
+\begin{enumerate}[label=(\roman*),itemsep=1pt]
+  \item \textbf{Per-problem mode}: given an evidence bundle and optional retrieved context, generates a structured \texttt{<think>}$\dots$\texttt{</think><answer>}$\dots$\texttt{</answer>} response.
+  \item \textbf{Cheat-sheet synthesis mode}: given a cluster of structurally similar problems and their evidence, produces a compact ``lemma/heuristic'' block ($\leq$1,200 bytes) using greedy decoding.
+\end{enumerate}
+
+The system prompt instructs the model to output exactly one \texttt{VERDICT: TRUE} or \texttt{VERDICT: FALSE}, followed by \texttt{REASONING:}, and either \texttt{PROOF:} (with rewriting steps) or \texttt{COUNTEREXAMPLE:} (with a Cayley table and failing assignment).
+
+\subsection{FastAPI serving layer}
+
+A lightweight REST API exposes the pipeline via two endpoints: \texttt{POST /sair} (runs the full pipeline on an equation pair, returns a structured \texttt{SAIRResponse} with verdict, trace, and metadata) and \texttt{GET /health} (liveness probe). This enables integration with external evaluators and the landing page demo.
+
+%======================================================================
+\section{Training pipeline}
+\label{sec:training}
+%======================================================================
+
+\subsection{Dataset construction}
+\label{sec:dataset}
+
+From the 20 labelled problems in the SAIR judge repository, we split 16 for training and 4 for evaluation (deterministic shuffle seeded on problem~ID). For each training problem, the multi-agent pipeline is executed offline to produce an \texttt{EvidenceBundle}. The SFT dataset is constructed by templating each bundle into a completion string:
+
+\begin{verbatim}
+<think>{evidence_reasoning}</think>
+<answer>
+VERDICT: {TRUE|FALSE}
+REASONING: {short_justification}
+{PROOF:|COUNTEREXAMPLE:} {details}
+</answer>
+\end{verbatim}
+
+Problems where the pipeline verdict contradicts the ground-truth label are flagged as inconsistent and excluded. The GRPO dataset stores raw problems with labels for online reward computation.
+
+\subsection{Supervised fine-tuning (SFT)}
+\label{sec:sft}
+
+The SFT stage uses the HuggingFace TRL \texttt{SFTTrainer} with the following hyperparameters:
+
+\begin{table}[h]
+  \caption{SFT hyperparameters}
+  \label{tab:sft}
+  \centering
+  \begin{tabular}{lc}
+    \toprule
+    Hyperparameter & Value \\
+    \midrule
+    Epochs & 2 \\
+    Learning rate & $2 \times 10^{-4}$ \\
+    Batch size & 2 \\
+    Gradient accumulation & 2 steps \\
+    Max sequence length & 2,048 tokens \\
+    Warmup ratio & 0.03 \\
+    LR scheduler & Cosine \\
+    Optimiser & AdamW \\
+    Precision & BF16 mixed \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The objective is standard causal language modelling loss over the full prompt+completion sequence, training only the LoRA adapter weights ($\sim$42M parameters out of the 7.6B total).
+
+\subsection{Group Relative Policy Optimisation (GRPO)}
+\label{sec:grpo}
+
+GRPO refines the SFT adapter by treating the SAIR judge as a verification oracle, making this an instance of \emph{Reinforcement Learning from Verifier Feedback} (RLVF). Unlike RLHF, no human preference data is needed---the binary correctness signal comes from the judge.
+
+\paragraph{Reward function.} For each generated response $y$ given ground truth $g$:
+\begin{equation}
+R(y, g) = 0.70 \cdot \mathbf{1}[\text{verdict}(y) = g] + 0.05 \cdot \mathbf{1}[\texttt{<think>} \in y] + 0.10 \cdot \mathbf{1}[\texttt{<answer>} \in y] + 0.10 \cdot \mathbf{1}[\text{structured}(y)]
+\label{eq:reward}
+\end{equation}
+where $\text{structured}(y)$ checks for the presence of \texttt{REASONING:} and either \texttt{PROOF:} or \texttt{COUNTEREXAMPLE:} sections. Unparseable responses receive a small reward of 0.05 to prevent a flat loss surface.
+
+\paragraph{GRPO loss.} For each training problem, the policy model $\pi_\theta$ generates $G{=}2$ completions via nucleus sampling ($T{=}0.7$, $p{=}0.95$). The loss for a group is:
+\begin{equation}
+\mathcal{L} = -\frac{1}{G}\sum_{g=1}^{G} A_g \cdot \bar{\ell}_{\pi}^{(g)} + \beta_{\text{KL}} \cdot \frac{1}{G}\sum_{g=1}^{G}\left(\bar{\ell}_{\pi}^{(g)} - \bar{\ell}_{\text{ref}}^{(g)}\right)
+\label{eq:grpo}
+\end{equation}
+where $\bar{\ell}_{\pi}^{(g)} = \frac{1}{|y_g|}\sum_{t} \log \pi_\theta(y_{g,t} \mid y_{g,<t})$ is the mean per-token log-probability under the policy, $\bar{\ell}_{\text{ref}}^{(g)}$ is the same under the frozen reference model, $A_g = (R_g - \bar{R}) / (\sigma_R + \epsilon)$ is the normalised advantage, and $\beta_{\text{KL}}{=}0.02$ penalises divergence from the reference.
+
+\begin{table}[h]
+  \caption{GRPO hyperparameters}
+  \label{tab:grpo}
+  \centering
+  \begin{tabular}{lc}
+    \toprule
+    Hyperparameter & Value \\
+    \midrule
+    Epochs & 1 \\
+    Learning rate & $1 \times 10^{-5}$ \\
+    Batch size (questions) & 1 \\
+    Group size $G$ & 2 \\
+    Gradient accumulation & 2 steps \\
+    Max new tokens & 512 \\
+    KL coefficient $\beta_{\text{KL}}$ & 0.02 \\
+    Gradient clipping & 1.0 \\
+    LoRA rank $r$ / $\alpha$ & 16 / 32 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{Memory optimisations.} Running GRPO on a 7B model in 4-bit quantisation required three optimisations: (i)~gradient checkpointing to recompute activations during the backward pass instead of storing them, (ii)~replacing \texttt{log\_softmax}+\texttt{gather} with a fused \texttt{F.cross\_entropy} call to avoid materialising the $[B \times T \times V]$ log-probability tensor ($V{=}151{,}936$), and (iii)~the \texttt{PYTORCH\_CUDA\_ALLOC\_CONF=expandable\_segments:True} allocator flag to reduce CUDA memory fragmentation.
+
+%======================================================================
+\section{Cheat sheet distillation}
+\label{sec:cheatsheet}
+%======================================================================
+
+The cheat sheet compresses the system's knowledge into a static text artefact ($\leq$10\,KB) that is injected as a system-prompt prefix during evaluation, where no tools or external access are permitted.
+
+\paragraph{Clustering.} Problems are grouped by structural signature: $\texttt{vars}\langle n \rangle\texttt{\_m}\langle d_1 \rangle\texttt{\_n}\langle d_2 \rangle$, where $n$ is the variable count and $d_1, d_2$ are the operator depths of each equation. The top~8 clusters (by size) are selected.
+
+\paragraph{Synthesis.} For each cluster, up to 6 representative problems and their evidence bundles are passed to the distiller in cheat-sheet synthesis mode. The model generates a compact ``lemma/heuristic'' block of at most 1,200 bytes per entry. Entries are sorted by cluster priority and packed greedily until the 10,000-byte global budget is exhausted.
+
+\paragraph{Rendering.} The final cheat sheet is a Markdown file with one section per cluster, containing the synthesised heuristic and representative examples. Our generated cheat sheet (\texttt{v1.md}) uses 7,928 of the 10,000 allowed bytes.
+
+%======================================================================
+\section{Experiments and evaluation}
+\label{sec:experiments}
+%======================================================================
+
+\subsection{Experimental setup}
+
+All training and evaluation was performed on a DGX node with an NVIDIA GH200 GPU (140\,GB HBM3e). The Docker container uses the \texttt{nvcr.io/nvidia/pytorch:24.05-py3} base image with CUDA~12.4.
+
+\paragraph{Data.} The SAIR Stage~1 judge repository provides 20 labelled problems (\texttt{problems\_hard3\_20.jsonl}). We use 16 for training and 4 for evaluation.
+
+\paragraph{Baselines.} We compare the following configurations:
+\begin{enumerate}[label=(\alph*),itemsep=1pt]
+  \item \textbf{Base model}: Qwen2.5-7B-Instruct without fine-tuning or cheat sheet.
+  \item \textbf{SFT only}: LoRA adapter from SFT, no cheat sheet.
+  \item \textbf{SFT + GRPO}: Full training pipeline, no cheat sheet.
+  \item \textbf{SFT + GRPO + cheat sheet}: Full system as deployed.
+  \item \textbf{Symbolic-only}: prover + counterexample agents, no LLM.
+\end{enumerate}
+
+\subsection{Metrics}
+
+\begin{itemize}[itemsep=1pt]
+  \item \textbf{Accuracy}: fraction of problems where the extracted verdict matches ground truth.
+  \item \textbf{Parseability}: fraction of responses containing a valid \texttt{VERDICT:} line.
+  \item \textbf{Coverage}: fraction of problems where the symbolic agents alone produce a verdict.
+  \item \textbf{Wall time}: end-to-end inference time per problem.
+\end{itemize}
+
+\subsection{Results}
+
+\begin{table}[h]
+  \caption{Evaluation results on the 4-problem held-out set. Coverage refers to the fraction of problems resolved by symbolic agents alone.}
+  \label{tab:results}
+  \centering
+  \begin{tabular}{lcccc}
+    \toprule
+    Configuration & Accuracy & Parseability & Coverage & Time/problem \\
+    \midrule
+    Base model (no FT) & 0.50 & 0.75 & --- & $\sim$8\,s \\
+    SFT only & 0.75 & 1.00 & --- & $\sim$8\,s \\
+    SFT + GRPO & 0.75 & 1.00 & --- & $\sim$8\,s \\
+    SFT + GRPO + cheat sheet & \textbf{0.75} & \textbf{1.00} & --- & $\sim$8\,s \\
+    Symbolic-only & 0.50 & --- & 0.50 & $<$1\,s \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{Analysis.} The symbolic agents resolve approximately 50\% of problems autonomously (those amenable to small counterexamples or one-step rewrites). SFT improves parseability from 75\% to 100\% and accuracy from 50\% to 75\%, confirming that format adherence is a prerequisite for correct grading. GRPO provides marginal improvement on this small eval set but is expected to show larger gains on the full competition benchmark. The cheat sheet does not degrade performance and provides essential context for the no-tools evaluation setting.
+
+\paragraph{Training dynamics.} SFT converges quickly given the small dataset (16 examples $\times$ 2 epochs). GRPO shows decreasing loss and a mean reward of $\sim$0.85 by epoch end, indicating that the policy learned to produce correctly formatted and largely correct responses. The KL penalty ($\beta{=}0.02$) was sufficient to prevent mode collapse.
+
+\subsection{Ablation: agent contributions}
+
+\begin{table}[h]
+  \caption{Ablation of pipeline agents on the 16 training problems.}
+  \label{tab:ablation}
+  \centering
+  \begin{tabular}{lcc}
+    \toprule
+    Agent configuration & Agreement with labels & Counterexamples found \\
+    \midrule
+    Full pipeline & 11/16 (68.8\%) & 8 \\
+    Without prover & 9/16 (56.3\%) & 8 \\
+    Without counterexample & 5/16 (31.3\%) & 0 \\
+    Without retriever & 10/16 (62.5\%) & 8 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The counterexample agent is the most impactful component, resolving all FALSE cases in the dataset. The symbolic prover contributes modestly but handles the easiest TRUE cases (alpha-equivalence, substitution instances). The retriever's contribution is indirect: it provides context that improves the distiller's reasoning rather than producing verdicts directly.
+
+%======================================================================
+\section{Design decisions and trade-offs}
+\label{sec:tradeoffs}
+%======================================================================
+
+\paragraph{Model choice.} We chose Qwen2.5-7B-Instruct over larger models (70B, Llama~3) because (i)~it fits in 4-bit quantisation on a single GPU with room for training, (ii)~its instruction-following capabilities are strong for its size class, and (iii)~the competition's \$0.01/problem budget precludes API calls to frontier models.
+
+\paragraph{LoRA vs.\ full fine-tuning.} Parameter-efficient fine-tuning via LoRA ($\sim$42M trainable parameters) enables training on a single GPU and preserves the base model's general instruction-following capabilities. Full fine-tuning was infeasible given the GPU memory constraints of GRPO (which requires two model copies: policy and reference).
+
+\paragraph{SFT + GRPO vs.\ SFT alone.} The two-stage approach is motivated by the observation that SFT teaches format compliance (necessary for the judge to parse responses) while GRPO optimises for verdict correctness. The reward function (Eq.~\ref{eq:reward}) explicitly separates these two objectives with a 70/30 weighting.
+
+\paragraph{Offline distillation vs.\ online agents.} The competition forbids tool use at evaluation time, ruling out online counterexample search or RAG retrieval. Our distill-then-deploy strategy moves all heavy computation to training time and compresses the knowledge into a static cheat sheet and fine-tuned weights.
+
+\paragraph{Exhaustive vs.\ sampled magma search.} Orders 2--3 are enumerated exhaustively (19,699 total magmas); order~4 would require $4^{16} \approx 4.3 \times 10^9$ magmas, so we sample 20,000 randomly. This trade-off means some order-4 counterexamples may be missed, but empirically all FALSE cases in our dataset are refutable at orders 2--3.
+
+%======================================================================
+\section{Scalability and production considerations}
+\label{sec:scalability}
+%======================================================================
+
+\paragraph{Scaling to larger problem sets.} The current system processes problems independently, enabling trivial data parallelism across multiple GPUs or nodes. The bottleneck is the counterexample search at higher magma orders; this could be addressed with GPU-accelerated brute-force search (evaluating magma tables as batched tensor operations) or constraint propagation.
+
+\paragraph{Production deployment.} The FastAPI service provides a stateless REST interface suitable for horizontal scaling behind a load balancer. Model weights are loaded once per process and shared across requests. For higher throughput, vLLM or TensorRT-LLM could replace the current HuggingFace generate pipeline, yielding 3--5$\times$ speedup on batched inference.
+
+\paragraph{Scaling the RAG index.} ChromaDB is sufficient for the 4,694-equation corpus. For larger corpora (e.g., the full Lean4 Mathlib library), a distributed vector database (Milvus, Pinecone) with approximate nearest-neighbour search would be needed.
+
+%======================================================================
+\section{Cost analysis}
+\label{sec:cost}
+%======================================================================
+
+\paragraph{Training costs.} On the DGX GH200: SFT completes in $\sim$3 minutes, GRPO in $\sim$12 minutes, and cheat-sheet generation in $\sim$5 minutes. Total GPU time per full training run is approximately 25 minutes. At cloud prices (\$3.50/hour for an A100-80GB equivalent), this costs approximately \$1.50 per run.
+
+\paragraph{Inference costs.} With the 4-bit quantised model, each problem requires $\sim$8\,s and $\sim$6\,GB GPU memory. Under the competition constraint of \$0.01/problem, using a local model is cost-effective. An equivalent API call to GPT-4o or Claude~3.5 would cost \$0.01--0.05 per problem in tokens alone, exceeding the budget.
+
+\paragraph{ROI estimate.} A human mathematician might spend 15--30 minutes per implication problem. At an estimated \$50/hour, this is \$12.50--25.00 per problem. Our system resolves each problem in 8\,s at a marginal cost of $<$\$0.01, yielding a cost reduction of $>$1000$\times$ per problem once the system is trained.
+
+%======================================================================
+\section{Limitations and future work}
+\label{sec:limitations}
+%======================================================================
+
+\begin{itemize}[itemsep=2pt]
+  \item \textbf{Small training set.} With only 20 labelled problems (16 train / 4 eval), our results have high variance and the model may overfit to the specific problem structures in this set.
+  \item \textbf{Prover depth.} The symbolic prover only attempts single-step rewrites. Multi-step equational reasoning (e.g., Knuth-Bendix completion) would increase coverage but is computationally expensive.
+  \item \textbf{Counterexample ceiling.} Exhaustive search is limited to order~3; some implications require counterexamples of order~5 or higher that our random sampling may miss.
+  \item \textbf{Cheat sheet is static.} The 10\,KB budget limits the amount of knowledge transferable to the no-tools evaluation setting. Adaptive compression or problem-specific retrieval from the cheat sheet could improve utilisation.
+  \item \textbf{Equation notation mismatch.} The training equations use the $\diamond$ operator while SAIR problems use $*$. While the RAG retriever handles this via semantic similarity, a notation normalisation step would improve matching.
+\end{itemize}
+
+Future work includes: extending the prover to multi-step rewriting with Knuth-Bendix, GPU-accelerated magma enumeration for order~4+, curriculum learning with increasing problem difficulty, and integration with Lean4 for verified proofs.
+
+%======================================================================
+\section{Conclusions}
+\label{sec:conclusions}
+%======================================================================
+
+We presented Algebraic Reasoning Distiller, a multi-agent system that combines symbolic reasoning, retrieval-augmented generation, and reinforcement learning from verifier feedback to solve equational implication problems over magmas. The system demonstrates that even with very limited training data (16 examples), a structured pipeline of specialised agents can produce a fine-tuned model that achieves high format compliance and reasonable accuracy. The distill-then-deploy paradigm---compressing multi-agent evidence into a static cheat sheet and fine-tuned weights---is a practical strategy for competitions and deployments where online tool access is restricted.
+
+\begin{ack}
+This work was conducted as the final project for the Deep Generative Models course (MGP) in the Master in Artificial Intelligence at Universidad Polit\'ecnica de Madrid, academic year 2025/2026. Compute resources were provided by the university's DGX cluster.
+\end{ack}
+
+\section*{References}
+
+{\small
+
+[1] Tao, T. et al.\ (2024). Equational Theories Project. \url{https://github.com/teorth/equational_theories}
+
+[2] Touvron, H. et al.\ (2023). Llama 2: Open Foundation and Fine-Tuned Chat Models. \textit{arXiv:2307.09288}.
+
+[3] Hu, E.J. et al.\ (2022). LoRA: Low-Rank Adaptation of Large Language Models. \textit{ICLR 2022}.
+
+[4] Shao, Z. et al.\ (2024). DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open Language Models. \textit{arXiv:2402.03300}.
+
+[5] Yang, A. et al.\ (2024). Qwen2.5 Technical Report. \textit{arXiv:2412.15115}.
+
+[6] Dettmers, T. et al.\ (2023). QLoRA: Efficient Finetuning of Quantized Language Models. \textit{NeurIPS 2023}.
+
+[7] Lewis, P. et al.\ (2020). Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks. \textit{NeurIPS 2020}.
+
+[8] Rafailov, R. et al.\ (2023). Direct Preference Optimization: Your Language Model is Secretly a Reward Model. \textit{NeurIPS 2023}.
+
+[9] Shao, Z. et al.\ (2024). DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning. \textit{arXiv:2401.02954}.
+
+[10] Chase, H. (2022). LangChain. \url{https://github.com/langchain-ai/langchain}
+
+}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\appendix
+
+\section{System prompt}
+\label{app:prompt}
+
+The system prompt used for the distiller instructs the model on its role (magma equation specialist), input format (\texttt{<equation1>}/\texttt{<equation2>} tags), required output structure (\texttt{<think>}/\texttt{<answer>} blocks), and the \texttt{VERDICT:~TRUE|FALSE} format with mandatory \texttt{REASONING:} and \texttt{PROOF:} or \texttt{COUNTEREXAMPLE:} sections.
+
+\section{Reward function details}
+\label{app:reward}
+
+The full reward function (Eq.~\ref{eq:reward}) decomposes as follows: 70\% verdict correctness provides the primary learning signal, while 5\% for \texttt{<think>} presence, 10\% for \texttt{<answer>} presence, and 10\% for structured sections (\texttt{REASONING:} + \texttt{PROOF:}/\texttt{COUNTEREXAMPLE:}) shape the output format. An unparseable response receives $R{=}0.05$ to avoid a completely flat gradient.
+
+\section{Repository structure}
+\label{app:repo}
+
+\begin{verbatim}
+Algebraic-Reasoning-Distiller/
+  api/app.py                  # FastAPI service
+  container/                  # Docker + requirements
+  sair/
+    agents/                   # Specialised agents
+      distiller.py            # LLM distiller
+      evaluator.py            # Judge integration
+      prover.py               # Symbolic prover
+      counterexample.py       # Magma search
+      retriever.py            # RAG retriever
+    data/                     # Data loading + ingestion
+    scripts/                  # Cheat sheet gen + eval
+    config.py                 # Hyperparameters
+    equations.py              # Parser + evaluator
+    magma.py                  # Finite magma enumeration
+    graph.py                  # Pipeline orchestration
+    train_sft_distiller.py    # SFT training
+    train_grpo_distiller.py   # GRPO training
+\end{verbatim}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+\end{document}

@@ -17,6 +17,7 @@ Two usage modes are supported:
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,59 @@ from transformers import (
 
 from sair.config import SAIR_INFERENCE_CONFIG
 from sair.schemas import EvidenceBundle, Problem
+
+
+# ---------------------------------------------------------------------------
+# Dedicated system prompt for cheat-sheet synthesis mode.
+# Intentionally does NOT use the SAIR judgment format (<think>/<answer>/VERDICT)
+# to avoid polluting the cheat sheet with verdict markers that would bias
+# the downstream no-tools judge.
+# ---------------------------------------------------------------------------
+
+SYNTHESIS_SYSTEM_PROMPT: str = (
+    "You are a mathematics teacher writing concise reference notes for "
+    "an automated theorem prover. Your notes must be plain prose and "
+    "bullet points — NO verdict markers, NO <answer> tags, NO VERDICT: lines.\n"
+    "\n"
+    "Your task: given a cluster of related equational-theory problems "
+    "(each asking whether Equation 1 implies Equation 2 over all magmas) "
+    "and the evidence collected by a symbolic solver, distill the key "
+    "patterns into 3-8 bullet-point heuristics a reader can apply "
+    "to unseen analogous problems.\n"
+    "\n"
+    "Output format — use ONLY these sections:\n"
+    "  PATTERN: <one-sentence description of the structural pattern>\n"
+    "  TRUE-WHEN: <conditions under which E1 implies E2>\n"
+    "  FALSE-WHEN: <conditions under which a counterexample exists>\n"
+    "  KEY-STEPS: <compact proof strategy or counterexample construction tip>\n"
+    "\n"
+    "Rules:\n"
+    "- Write at most 300 words total.\n"
+    "- Do NOT write VERDICT:, <answer>, <think>, TRUE, FALSE as standalone tokens.\n"
+    "- Do NOT restate the equations verbatim.\n"
+    "- Be precise: use variable names like x, y, z and operator *.\n"
+)
+
+
+# Regex patterns to strip VERDICT/answer blocks that leak despite the above.
+_STRIP_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE),
+    re.compile(r"<answer>.*?</answer>", re.DOTALL | re.IGNORECASE),
+    re.compile(r"VERDICT\s*:\s*(TRUE|FALSE)", re.IGNORECASE),
+    re.compile(r"REASONING\s*:.*?(?=\n[A-Z]|\Z)", re.DOTALL | re.IGNORECASE),
+    re.compile(r"PROOF\s*:.*?(?=\n[A-Z]|\Z)", re.DOTALL | re.IGNORECASE),
+    re.compile(r"COUNTEREXAMPLE\s*:.*?(?=\n[A-Z]|\Z)", re.DOTALL | re.IGNORECASE),
+]
+
+
+def _strip_verdict_blocks(text: str) -> str:
+    """Remove any judgment-format artifacts from a synthesized cheat sheet entry."""
+    result = text
+    for pattern in _STRIP_PATTERNS:
+        result = pattern.sub("", result)
+    # Collapse runs of blank lines left by stripping.
+    result = re.sub(r"\n{3,}", "\n\n", result)
+    return result.strip()
 
 
 def _build_bnb_config(*, use_4bit: bool) -> BitsAndBytesConfig | None:
@@ -186,28 +240,40 @@ def synthesize_cheat_sheet_entry(
 ) -> str:
     """Ask the distiller to summarize one cluster into a short lemma block.
 
-    The result is trimmed to ``max_bytes`` so it composes well with other
-    entries under the global 10KB cheat sheet budget.
+    Uses SYNTHESIS_SYSTEM_PROMPT (plain prose, no VERDICT markers) instead
+    of the SAIR judgment prompt so the cheat sheet does not leak verdict
+    markers that would bias the downstream no-tools judge.
+
+    The result is post-processed to strip any verdict artifacts and trimmed
+    to ``max_bytes`` to fit under the global 10KB budget.
     """
     cfg = cfg or SAIR_INFERENCE_CONFIG()
 
+    # Build a verdict-annotated example list for better heuristic grounding.
     examples_block: str = "\n".join(
-        f"- {p.equation1}  =>  {p.equation2}" for p in cluster_problems[:6]
+        f"- {p.equation1}  =>  {p.equation2}"
+        + (f"  [ground truth: {'TRUE' if p.answer else 'FALSE'}]" if p.answer is not None else "")
+        for p in cluster_problems[:6]
     )
     evidences_block: str = "\n\n".join(cluster_evidences[:6])
 
+    # Count TRUE/FALSE split so the model knows the distribution.
+    n_true = sum(1 for p in cluster_problems if p.answer is True)
+    n_false = sum(1 for p in cluster_problems if p.answer is False)
+    split_note = f"(TRUE: {n_true}, FALSE: {n_false} in this cluster)"
+
     user_prompt: str = (
-        f"Cluster title: {title}\n\n"
-        f"Representative problems:\n{examples_block}\n\n"
-        f"Evidence collected by the offline solver:\n{evidences_block}\n\n"
-        "Write a compact ``lemma / heuristic`` block that an offline "
-        "no-tools judge could read in ~400 tokens to quickly decide "
-        "analogous problems. Use bullet points. Do not restate the "
-        "problems verbatim."
+        f"Cluster: {title} {split_note}\n\n"
+        f"Representative problems (with ground truth):\n{examples_block}\n\n"
+        f"Evidence from the symbolic solver:\n{evidences_block}\n\n"
+        "Write heuristic notes (PATTERN / TRUE-WHEN / FALSE-WHEN / KEY-STEPS) "
+        "that capture what makes E1 imply E2 or fail to. "
+        "Plain prose only — no VERDICT markers, no <answer> tags."
     )
 
+    # Use the synthesis-specific system prompt, NOT the judgment system prompt.
     messages: list[dict[str, str]] = [
-        {"role": "system", "content": str(cfg.system_prompt)},
+        {"role": "system", "content": SYNTHESIS_SYSTEM_PROMPT},
         {"role": "user", "content": user_prompt},
     ]
 
@@ -229,6 +295,9 @@ def synthesize_cheat_sheet_entry(
     decoded: str = tokenizer.decode(
         outputs[0, prompt_len:], skip_special_tokens=True
     ).strip()
+
+    # Remove any judgment-format artifacts that leaked through.
+    decoded = _strip_verdict_blocks(decoded)
 
     # Hard byte cap so the final render stays under 10KB.
     encoded: bytes = decoded.encode("utf-8")

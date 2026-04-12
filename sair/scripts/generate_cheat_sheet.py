@@ -58,24 +58,50 @@ def _cluster_problems(
     max_clusters: int,
     max_per_cluster: int,
 ) -> dict[str, list[Problem]]:
-    """Group problems by structural key and cap both counts."""
+    """Group problems by structural key with balanced TRUE/FALSE representation.
+
+    Half the cluster budget is allocated to TRUE-majority clusters and the
+    other half to FALSE-majority clusters so the cheat sheet does not bias
+    the downstream judge toward either verdict.
+    """
     buckets: dict[str, list[Problem]] = defaultdict(list)
     for p in problems:
         buckets[_structural_key(p)].append(p)
 
-    # Keep the largest buckets first so the cheat sheet covers common cases.
-    ranked: list[tuple[str, list[Problem]]] = sorted(
-        buckets.items(), key=lambda kv: len(kv[1]), reverse=True
-    )
+    # Split clusters by majority verdict.
+    true_clusters: list[tuple[str, list[Problem]]] = []
+    false_clusters: list[tuple[str, list[Problem]]] = []
+    for key, items in buckets.items():
+        n_true = sum(1 for p in items if p.answer is True)
+        n_false = sum(1 for p in items if p.answer is False)
+        if n_true >= n_false:
+            true_clusters.append((key, items))
+        else:
+            false_clusters.append((key, items))
+
+    # Sort each group by bucket size (larger = more representative).
+    true_clusters.sort(key=lambda kv: len(kv[1]), reverse=True)
+    false_clusters.sort(key=lambda kv: len(kv[1]), reverse=True)
+
+    half: int = max(1, max_clusters // 2)
     selected: dict[str, list[Problem]] = {}
-    for key, items in ranked[:max_clusters]:
+    for key, items in true_clusters[:half]:
         selected[key] = items[:max_per_cluster]
+    for key, items in false_clusters[:half]:
+        selected[key] = items[:max_per_cluster]
+
+    print(
+        f"[cheatsheet] cluster split: {len(true_clusters[:half])} TRUE-majority, "
+        f"{len(false_clusters[:half])} FALSE-majority"
+    )
     return selected
 
 
 def _render_cluster_title(key: str, problems: list[Problem]) -> str:
-    """Human-readable section title for a cluster."""
-    return f"Lemma pack {key} ({len(problems)} problems)"
+    """Human-readable section title showing the TRUE/FALSE split."""
+    n_true = sum(1 for p in problems if p.answer is True)
+    n_false = sum(1 for p in problems if p.answer is False)
+    return f"Lemma pack {key} (T:{n_true} F:{n_false})"
 
 
 def _collect_evidences(
@@ -126,7 +152,20 @@ def generate(
     model, tokenizer, adapter_label = load_distiller_model(cfg=cfg)
     print(f"[cheatsheet] distiller adapter: {adapter_label}")
 
-    entries: list[CheatSheetEntry] = []
+    # Preamble entry: tells the judge how to read the cheat sheet.
+    preamble_body: str = (
+        "Each section below contains heuristics for a structural cluster of "
+        "equational-implication problems over magmas (binary op `*`, no axioms).\n"
+        "- TRUE-WHEN: conditions under which E1 logically implies E2.\n"
+        "- FALSE-WHEN: conditions under which a small counterexample exists.\n"
+        "- KEY-STEPS: proof sketch or counterexample construction.\n"
+        "Use these heuristics as a guide, not a lookup table. "
+        "Always verify with a short reasoning chain before issuing a VERDICT."
+    )
+    entries: list[CheatSheetEntry] = [
+        CheatSheetEntry(title="HOW TO USE THIS CHEAT SHEET", body=preamble_body, priority=999)
+    ]
+
     for key, cluster in clusters.items():
         print(f"[cheatsheet] cluster {key}: {len(cluster)} problems")
         collected: list[tuple[Problem, EvidenceBundle]] = _collect_evidences(

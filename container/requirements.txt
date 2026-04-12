@@ -1,0 +1,45 @@
+# ============================================================
+# Algebraic-Reasoning-Distiller — Python dependencies
+#
+# Base image nvcr.io/nvidia/pytorch:24.05-py3 already includes:
+#   torch, torchvision, torchaudio  (CUDA 12.4)
+# Do NOT re-install them here.
+# ============================================================
+
+# ── HuggingFace ecosystem ──────────────────────────────────
+transformers>=4.38.0
+accelerate>=0.27.0
+datasets>=2.14.0
+huggingface-hub[cli]>=0.36.0
+tokenizers>=0.15.0
+
+# ── LoRA + RLVF fine-tuning ────────────────────────────────
+peft>=0.7.0
+trl>=0.7.10
+
+# ── 4-bit quantisation (NF4 + BF16) ───────────────────────
+# Pre-built wheel for CUDA 12.x — matches the base image
+bitsandbytes>=0.41.0
+
+# ── LangChain / LangGraph (multi-agent pipeline) ──────────
+langchain>=0.1.0
+langchain-community>=0.4.1
+langgraph>=0.2.0
+
+# ── Vector store + embeddings (RAG retriever) ─────────────
+chromadb>=0.4.22
+sentence-transformers>=2.5.0
+
+# ── FastAPI server ─────────────────────────────────────────
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+python-multipart>=0.0.21
+
+# ── Data validation ────────────────────────────────────────
+pydantic>=2.6.0
+
+# ── Utilities ──────────────────────────────────────────────
+numpy>=1.26
+tqdm>=4.67
+requests
+pytest

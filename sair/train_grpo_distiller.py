@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 import torch
+import torch.nn.functional as F
 from datasets import Dataset
 from peft import (
     LoraConfig,
@@ -184,7 +185,7 @@ def _load_base_and_policy(
 
     if bool(cfg.use_4bit):
         base_model = prepare_model_for_kbit_training(
-            base_model, use_gradient_checkpointing=False
+            base_model, use_gradient_checkpointing=True
         )
         base_model.config.use_cache = False
 
@@ -229,31 +230,40 @@ def _gather_generated_logp_stats(
     attention_mask: torch.Tensor,
     prompt_len: int,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Sum log-probs and token counts for the generated portion of each sequence."""
-    outputs: Any = model(input_ids=input_ids, attention_mask=attention_mask)
-    logits: torch.Tensor = outputs.logits
+    """Sum log-probs and token counts for the generated portion of each sequence.
 
-    log_probs_all: torch.Tensor = torch.log_softmax(logits[:, :-1, :], dim=-1)
-    target_tokens: torch.Tensor = input_ids[:, 1:]
-    attn: torch.Tensor = attention_mask[:, 1:]
+    Uses F.cross_entropy instead of log_softmax+gather to avoid materialising
+    the full [bsz, seq_len, vocab_size] tensor in the compute graph.
+    """
+    outputs: Any = model(input_ids=input_ids, attention_mask=attention_mask)
+    logits: torch.Tensor = outputs.logits          # [bsz, seq_len, vocab]
+
+    bsz: int = int(input_ids.shape[0])
+    seq_len: int = int(logits.shape[1]) - 1
+    vocab_size: int = int(logits.shape[2])
+
+    target_tokens: torch.Tensor = input_ids[:, 1:]    # [bsz, seq_len]
+    attn: torch.Tensor = attention_mask[:, 1:]         # [bsz, seq_len]
+
+    # log p(token) = -cross_entropy; cross_entropy fuses softmax+log+gather
+    # internally so the full [bsz*seq_len, vocab] log_softmax is never stored.
+    log_probs: torch.Tensor = -F.cross_entropy(
+        logits[:, :-1, :].reshape(-1, vocab_size).float(),
+        target_tokens.reshape(-1),
+        reduction="none",
+    ).reshape(bsz, seq_len)
+    del logits
 
     start_tgt: int = max(int(prompt_len) - 1, 0)
-    bsz: int = int(input_ids.shape[0])
     sums: list[torch.Tensor] = []
     counts: list[torch.Tensor] = []
 
     for b in range(bsz):
-        gen_mask: torch.Tensor = torch.zeros_like(attn[b], dtype=torch.bool)
-        if start_tgt < int(gen_mask.numel()):
+        gen_mask: torch.Tensor = torch.zeros(seq_len, dtype=torch.bool, device=log_probs.device)
+        if start_tgt < seq_len:
             gen_mask[start_tgt:] = True
         gen_mask = gen_mask & attn[b].to(dtype=torch.bool)
-
-        picked: torch.Tensor = (
-            log_probs_all[b]
-            .gather(dim=-1, index=target_tokens[b].unsqueeze(-1))
-            .squeeze(-1)
-        )
-        sums.append(picked[gen_mask].sum())
+        sums.append((log_probs[b] * gen_mask.float()).sum())
         counts.append(torch.tensor(int(gen_mask.sum().item()), device=input_ids.device))
 
     return torch.stack(sums, dim=0), torch.stack(counts, dim=0)

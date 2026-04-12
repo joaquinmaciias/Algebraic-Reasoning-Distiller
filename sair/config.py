@@ -43,7 +43,7 @@ MODEL_NAME: str = "Qwen/Qwen2.5-7B-Instruct"
 USE_4_BIT: bool = True
 MAX_SEQ_LEN: int = 2048
 
-MAX_NEW_TOKENS: int = 1024
+MAX_NEW_TOKENS: int = 512
 TEMPERATURE: float = 0.7
 TOP_P: float = 0.95
 
@@ -144,7 +144,7 @@ class SAIR_GRPO_CONFIG:
     epochs: int = 1
     lr: float = 1e-5
     batch_size_questions: int = 1
-    group_size: int = 4
+    group_size: int = 2
     max_train_examples: int | None = 1_000
     grad_accum_steps: int = 2
     clip_grad_norm: float = 1.0

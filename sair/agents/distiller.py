@@ -82,7 +82,7 @@ def load_distiller_model(
     model: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
         pretrained_model_name_or_path=str(cfg.model_name),
         quantization_config=bnb_config,
-        dtype=torch.bfloat16,
+        torch_dtype=torch.bfloat16,
         device_map="auto",
     )
     model.config.pad_token_id = int(tokenizer.pad_token_id)

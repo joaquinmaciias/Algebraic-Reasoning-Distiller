@@ -141,6 +141,7 @@ def train() -> None:
         max_grad_norm=1.0,
         max_length=int(cfg.max_seq_len),
         packing=False,
+        completion_only_loss=False,
     )
 
     formatting_func: Any = partial(

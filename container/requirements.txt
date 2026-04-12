@@ -8,7 +8,7 @@
 
 # ── HuggingFace ecosystem ──────────────────────────────────
 # Pin to a range known to work together on Python 3.10 + CUDA 12.4
-transformers>=4.44.0,<4.53.0
+transformers>=4.51.0,<4.52.0
 accelerate>=0.30.0,<1.0.0
 datasets>=2.20.0
 huggingface-hub[cli]>=0.24.0,<1.0.0

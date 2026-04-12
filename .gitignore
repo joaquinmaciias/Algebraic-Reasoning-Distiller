@@ -1,0 +1,58 @@
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.Python
+
+# ── Virtual environments ──────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+.env
+
+# ── uv ───────────────────────────────────────────────────────────────────────
+# Keep uv.lock (pinned deps are important for reproducibility on DGX)
+# Ignore local uv cache references
+.uv/
+
+# ── Model weights ─────────────────────────────────────────────────────────────
+# Weights are large binaries — store on DGX workdata or HuggingFace Hub
+weights/
+# Keep the .gitkeep placeholder so the folder is tracked
+!weights/.gitkeep
+
+# ── Training artifacts (generated, not source) ────────────────────────────────
+sair/data/training/
+sair/artifacts/
+sair/vectorstore/
+
+# Keep cheat sheets (they are the final deliverable, small, worth versioning)
+# !sair/cheat_sheets/
+
+# ── Jupyter / notebooks ───────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb
+
+# ── IDE / OS ──────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ── Logs & temp files ─────────────────────────────────────────────────────────
+*.log
+*.tmp
+*.bak
+tmp/
+
+# ── Docker / container ────────────────────────────────────────────────────────
+# Keep all container source — it is needed to build on DGX
+# Ignore runtime artefacts if any
+container/.env
+
+# ── HuggingFace cache ─────────────────────────────────────────────────────────
+.cache/

@@ -1,0 +1,228 @@
+name: ${COMPOSE_PROJECT_NAME}
+
+services:
+  ubuntu:
+    # container_name: ${USER}-${PWD}-container  # comment to fallback to default naming: <project>_<service>_<index>
+    image: dgx-ubuntu  # comment to fallback to default naming: <project>_<service>
+    build:
+      context: .
+      args:
+        UID: ${HOST_UID}
+        GID: ${HOST_GID}
+        USERNAME: "${CONTAINER_USER}"
+        INSTALL_DOCKER: "${INSTALL_DOCKER}"
+
+    labels:
+      - >-
+        devcontainer.metadata=[{
+          "remoteUser":"${CONTAINER_USER}",
+          "containerUser":"${CONTAINER_USER}",
+          "customizations":{
+            "vscode":{
+              "extensions":[
+                "ms-python.python",
+                "ms-toolsai.jupyter",
+                "ms-python.vscode-pylance",
+                "charliermarsh.ruff"
+              ]
+            }
+          }
+        }]
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${HOST_VOLUME_PATH}:/mnt/workdata/
+      - ./utils/:/mnt/utils/
+
+    environment:
+      - USER=${CONTAINER_USER}
+      - CONTAINER_USER=${CONTAINER_USER}
+
+      - COMPOSE_STATE_DIR=${COMPOSE_STATE_DIR}
+
+      - UV_CACHE_DIR=/mnt/workdata/${UV_CACHE_SUBDIR}
+      - UV_LINK_MODE=hardlink
+
+      - PERSISTENT_UV_CACHE=${PERSISTENT_UV_CACHE}  # ??
+
+      # cleanup cache everytime a 
+      # - PERSISTENT_CACHE=true
+      - COMPOSE_STATE_DIR=${COMPOSE_STATE_DIR}
+      - CACHE_CLEANUP_STRATEGY=${CACHE_CLEANUP_STRATEGY:-0}
+      - CLEANUP_TIMER_FILE=${CLEANUP_TIMER_FILE}
+      - CACHE_CLEANUP_TIME=${CACHE_CLEANUP_TIME}
+
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - DISPLAY_INFO_AT_STARTUP=true
+
+    user: "root"
+
+    command:
+      - bash
+      - -lc
+      - |
+          set -Eeuo pipefail
+
+          mkdir -p "$$(dirname -- "$${COMPOSE_STATE_DIR}")"
+          printf '%s\n' true > "$${COMPOSE_STATE_DIR}"
+          echo true > ${COMPOSE_STATE_DIR}
+          HOME="/home/$$CONTAINER_USER"
+          mkdir -p $$HOME
+          chown -R "${HOST_UID}:${HOST_GID}" $$HOME || true
+          chmod 755 $$HOME || true
+
+
+          # SET UP UTILS VOLUME
+
+          rm -f $$HOME/.bashrc
+          cp /mnt/utils/system/.bashrc $$HOME/.bashrc
+          rm -f $$HOME/.inputrc
+          cp /mnt/utils/system/.inputrc $$HOME/.inputrc
+          cp /mnt/utils/system/bash.bashrc /etc/bash.bashrc
+          rm -rf $$HOME/.config
+          mkdir -p $$HOME/.config
+          cp -a /mnt/utils/.config/. $$HOME/.config/
+
+
+          # SET UP WORKDATA VOLUME
+
+          mkdir -p \
+            /mnt/workdata/${DATA_SUBDIR} \
+            /mnt/workdata/${UV_CACHE_SUBDIR} \
+            /mnt/workdata/${SSH_SUBDIR}
+          rm -rf $$HOME/data
+          ln -sfn /mnt/workdata/${DATA_SUBDIR} $$HOME/data
+          rm -rf $$HOME/.cache
+          ln -sfn /mnt/workdata/${CACHE_SUBDIR} $$HOME/.cache
+          rm -rf $$HOME/.ssh
+          ln -sfn /mnt/workdata/${SSH_SUBDIR} $$HOME/.ssh
+          chown -R ${HOST_UID}:${HOST_GID} /mnt/workdata || true
+          chown -R ${HOST_UID}:${HOST_GID} $$HOME || true
+          chmod 700 /mnt/workdata/${SSH_SUBDIR}
+          chmod 600 /mnt/workdata/${SSH_SUBDIR}/* 2>/dev/null || true
+
+
+          # SET UP UV
+
+          su - "${CONTAINER_USER}" -s /bin/bash -c '
+            set -Eeuo pipefail
+            # Force correct HOME even if something preserves environment incorrectly
+            export HOME="/home/'"${CONTAINER_USER}"'"
+            export USER="'"${CONTAINER_USER}"'"
+            export PATH="$HOME/.local/bin:$PATH"
+            export UV_CACHE_DIR="/mnt/workdata/${UV_CACHE_SUBDIR}"
+            # Make sure the file exists (better error)
+            test -f "$$HOME/.config/uv/install.sh"
+            echo "$$HOME/.config/uv/install.sh"
+            source "$$HOME/.config/uv/install.sh"
+            uv tool install ruff --force
+            uv tool install ty --force
+            uv tool install black --force
+            uv tool install pytest --force
+            uv tool install "dvc[ssh,s3]" --force
+            source "$$HOME/.config/uv/define-functions.sh"
+            command -v uncache >/dev/null 2>&1 && uncache >/dev/null  # silent success & visible failure
+          '
+
+
+          # SET UP CLEANUP CACHE CLEANUP METHOD
+
+          case "$${CACHE_CLEANUP_STRATEGY:-0}" in
+            0)
+              # No se hace nada
+              ;;
+            1|2)
+              mkdir -p /run/control/src /run/control/var /run/control/log
+              chmod 777 /run/control/log
+              install -m 666 /dev/null /run/control/log/cache-cleanup.log || true
+
+              cp -f /mnt/utils/control/cache-cleanup-hook.sh /run/control/src/cache-cleanup-hook.sh
+              cp -f /mnt/utils/control/cache-cleanup-timer.sh /run/control/src/cache-cleanup-timer.sh
+              chmod 755 /run/control/src/cache-cleanup-hook.sh /run/control/src/cache-cleanup-timer.sh
+
+              : "$${CLEANUP_TIMER_FILE:=/run/control/var/cache-cleanup-time}"
+              : "$${CACHE_CLEANUP_TIME:=3600}"
+
+              mkdir -p "$$(dirname -- "$${CLEANUP_TIMER_FILE}")"
+              printf '%s\n' "$${CACHE_CLEANUP_TIME}" > "$${CLEANUP_TIMER_FILE}"
+
+              _cg="$$(id -gn "$${CONTAINER_USER}" 2>/dev/null || echo "$${CONTAINER_USER}")"
+              chown "$${CONTAINER_USER}:$$_cg" "$${CLEANUP_TIMER_FILE}" 2>/dev/null || true
+              chmod 664 "$${CLEANUP_TIMER_FILE}" 2>/dev/null || true
+
+              : > "$${CLEANUP_TIMER_FILE}.lock"
+              chown "$${CONTAINER_USER}:$$_cg" "$${CLEANUP_TIMER_FILE}.lock" 2>/dev/null || true
+              chmod 664 "$${CLEANUP_TIMER_FILE}.lock" 2>/dev/null || true
+
+              nohup /bin/bash /run/control/src/cache-cleanup-timer.sh \
+                --mode="$${CACHE_CLEANUP_STRATEGY}" \
+                --state-file="$${CLEANUP_TIMER_FILE}" \
+                --timeout="$${CACHE_CLEANUP_TIME}" \
+                --hook="/run/control/src/cache-cleanup-hook.sh" \
+                --user="$${CONTAINER_USER}" \
+                --home="/home/$${CONTAINER_USER}" \
+                --tick="10" \
+                >/run/control/log/cache-cleanup-timer.stdout.log 2>&1 &
+              ;;
+            *)
+              echo "Invalid CACHE_CLEANUP_STRATEGY='$${CACHE_CLEANUP_STRATEGY}'" >&2
+              ;;
+          esac
+
+
+          # MAKE DOCKER USABLE INSIDE THE CONTAINER
+
+          # 1) Ensure the user can talk to the host docker socket
+          if [ -S /var/run/docker.sock ]; then
+            DOCKER_SOCK_GID="$(stat -c '%g' /var/run/docker.sock)"
+            if ! getent group "$${DOCKER_SOCK_GID}" >/dev/null; then
+              groupadd -g "$${DOCKER_SOCK_GID}" docker-host 2>/dev/null || true
+            fi
+            usermod -aG "$${DOCKER_SOCK_GID}" "${CONTAINER_USER}" 2>/dev/null || true
+          
+            # 2) Pin Docker client state (HOME/DOCKER_CONFIG) for the *user* so buildx stays stable
+            printf '%s\n' \
+              'export HOME="/home/'"${CONTAINER_USER}"'"' \
+              'export USER="'"${CONTAINER_USER}"'"' \
+              'export DOCKER_CONFIG="/home/'"${CONTAINER_USER}"'/.docker"' \
+              > /etc/profile.d/docker-env.sh
+
+            chmod 644 /etc/profile.d/docker-env.sh
+            mkdir -p "/home/${CONTAINER_USER}/.docker"
+            chown -R "${HOST_UID}:${HOST_GID}" "/home/${CONTAINER_USER}/.docker" 2>/dev/null || true
+            chmod 700 "/home/${CONTAINER_USER}/.docker" 2>/dev/null || true
+            # 3) If docker CLI is installed in the image, create/use ONE builder (daemon cache)
+            if [ "${INSTALL_DOCKER}" = "true" ]; then
+              export DOCKER_BUILDKIT=1
+              export COMPOSE_DOCKER_CLI_BUILD=1
+
+              sudo -u "${CONTAINER_USER}" -E bash -lc '
+                set -Eeuo pipefail
+                docker buildx create --name session --driver docker --use >/dev/null 2>&1 || true
+                docker buildx use session >/dev/null 2>&1 || true
+              '
+            fi
+            printf '%s\n' \
+              '#!/usr/bin/env bash' \
+              'set -Eeuo pipefail' \
+              ': "${CONTAINER_USER:?CONTAINER_USER is required}"' \
+              '' \
+              'export HOME="/home/${CONTAINER_USER}"' \
+              'export USER="${CONTAINER_USER}"' \
+              'export DOCKER_CONFIG="/home/${CONTAINER_USER}/.docker"' \
+              '' \
+              'if [ "$(id -u)" -eq 0 ]; then' \
+              '  exec sudo -u "${CONTAINER_USER}" -E docker compose "$@"' \
+              'fi' \
+              'exec docker compose "$@"' \
+              > /usr/local/bin/dc
+
+            chmod 755 /usr/local/bin/dc
+          fi
+
+
+          # KEEP THE CONTAINER ALIVE
+
+          printf '%s\n' false > "$${COMPOSE_STATE_DIR}"
+          exec su -s /bin/bash ${CONTAINER_USER} -c "sleep infinity"

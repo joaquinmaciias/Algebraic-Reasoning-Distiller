@@ -1,0 +1,59 @@
+# -----------------------------------------------------------------------------
+# Readline configuration (~/.inputrc)
+# -----------------------------------------------------------------------------
+
+# Completion behavior
+set completion-ignore-case on
+set show-all-if-ambiguous on
+set show-all-if-unmodified on
+set skip-completed-text on
+
+# -----------------------------------------------------------------------------
+# Word navigation with Ctrl + arrows
+# -----------------------------------------------------------------------------
+
+# Ctrl + Left / Right
+"\e[1;5D": backward-word
+"\e[1;5C": forward-word
+
+# Some terminals (incl. some VSCode setups)
+"\e[5D": backward-word
+"\e[5C": forward-word
+
+# -----------------------------------------------------------------------------
+# Word deletion
+# -----------------------------------------------------------------------------
+
+# Ctrl + Backspace → delete previous word
+"\C-h": backward-kill-word
+"\e[127;5u": backward-kill-word
+
+# Ctrl + Delete → delete next word
+"\e[3;5~": kill-word
+
+# Alt + Backspace fallback (some terminals send this)
+"\e\x7f": backward-kill-word
+
+# -----------------------------------------------------------------------------
+# History search with arrows (like zsh)
+# -----------------------------------------------------------------------------
+
+"\e[A": history-search-backward
+"\e[B": history-search-forward
+
+# -----------------------------------------------------------------------------
+# Home / End behavior
+# -----------------------------------------------------------------------------
+
+"\e[H": beginning-of-line
+"\e[F": end-of-line
+"\e[1~": beginning-of-line
+"\e[4~": end-of-line
+
+# -----------------------------------------------------------------------------
+# Misc (explicit common defaults)
+# -----------------------------------------------------------------------------
+
+"\C-w": backward-kill-word
+"\C-u": unix-line-discard
+"\C-k": kill-line

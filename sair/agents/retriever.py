@@ -26,7 +26,10 @@ def _try_load_vectordb() -> Any | None:
     """Best-effort load of the Chroma vectorstore. Returns None on failure."""
     try:
         from langchain_community.embeddings import SentenceTransformerEmbeddings
-        from langchain_community.vectorstores import Chroma
+        try:
+            from langchain_chroma import Chroma
+        except ImportError:
+            from langchain_community.vectorstores import Chroma  # type: ignore[no-redef]
     except Exception:
         return None
 

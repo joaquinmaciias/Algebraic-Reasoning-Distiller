@@ -93,11 +93,15 @@ def main() -> None:
     """Build the Chroma vectorstore for the SAIR retriever."""
     try:
         from langchain_community.embeddings import SentenceTransformerEmbeddings
-        from langchain_community.vectorstores import Chroma
         from langchain_core.documents import Document
+        try:
+            # Prefer the dedicated langchain-chroma package (langchain>=0.2.9)
+            from langchain_chroma import Chroma
+        except ImportError:
+            from langchain_community.vectorstores import Chroma  # type: ignore[no-redef]
     except ImportError as exc:
         raise SystemExit(
-            "LangChain dependencies are missing. Run `uv sync` first."
+            "LangChain dependencies are missing. Run `pip install -r requirements.txt` first."
         ) from exc
 
     SAIR_VECTORSTORE_DIR.mkdir(parents=True, exist_ok=True)

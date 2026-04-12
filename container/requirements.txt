@@ -25,6 +25,7 @@ bitsandbytes>=0.43.0
 # ── LangChain / LangGraph (multi-agent pipeline) ──────────
 langchain>=0.2.0
 langchain-community>=0.2.0
+langchain-chroma>=0.1.0
 langgraph>=0.2.0
 
 # ── Vector store + embeddings (RAG retriever) ─────────────

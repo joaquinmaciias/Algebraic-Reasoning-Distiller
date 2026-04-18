@@ -16,6 +16,7 @@ Usage
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -288,6 +289,8 @@ def _decode_generated_only(
 def main(*, adapter_path: Path | None = None) -> None:
     """Run GRPO with the SAIR judge reward on top of an SFT adapter."""
     cfg: CONFIG = CONFIG()
+    if "CUDA_VISIBLE_DEVICES" not in os.environ:
+        os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
 

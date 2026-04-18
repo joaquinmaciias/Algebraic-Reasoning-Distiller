@@ -83,6 +83,9 @@ def train() -> None:
 
     # Force BF16 mixed precision to avoid GradScaler issues with 4-bit models.
     os.environ["ACCELERATE_MIXED_PRECISION"] = "bf16"
+    # Pin to single GPU — device_map="auto" with 4-bit conflicts with DataParallel.
+    if "CUDA_VISIBLE_DEVICES" not in os.environ:
+        os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
     tokenizer: Any = AutoTokenizer.from_pretrained(
         pretrained_model_name_or_path=cfg.model_name,

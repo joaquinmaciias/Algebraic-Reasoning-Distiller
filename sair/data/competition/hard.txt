@@ -1,0 +1,137 @@
+#0: x = y * (y * ((x * y) * x)) → x * y = ((z * x) * w) * y False
+
+#1: x * (y * z) = (z * w) * w → x * (y * x) = (x * y) * z False
+
+#2: x = ((y * y) * z) * x → x = x * (((y * x) * x) * x) True
+
+#3: (x * y) * x = (x * z) * w → x * (y * y) = x * (z * y) False
+
+#4: x = ((y * z) * (z * x)) * y → x * x = (y * (y * y)) * y False
+
+#5: x * x = (x * y) * z → x * x = (y * z) * w False
+
+#6: x = (y * (y * (y * z))) * x → x * y = z * (w * (w * y)) True
+
+#7: x = x * (y * ((y * z) * y)) → x = x * ((x * (x * x)) * x) False
+
+#8: x = ((x * x) * (y * z)) * y → x = ((x * (y * x)) * x) * y False
+
+#9: (x * x) * y = (y * y) * z → x * (y * y) = x * (z * z) False
+
+#10: x = (x * (y * z)) * (w * y) → x = (y * (z * w)) * (u * z) False
+
+#11: (x * y) * x = (z * w) * u → x * (x * x) = x * (y * y) False
+
+#12: x * y = ((z * y) * x) * x → x * y = y * (y * (y * y)) True
+
+#13: x = (y * x) * (x * (x * z)) → x = y * (z * (z * (x * y))) False
+
+#14: x * x = x * (y * (z * y)) → x * (x * x) = x * (y * x) False
+
+#15: x = (x * y) * (x * (y * z)) → x = (x * y) * (x * (z * y)) False
+
+#16: x = y * (((x * y) * x) * y) → x = ((x * (y * z)) * z) * y False
+
+#17: x = ((y * x) * y) * (z * z) → x = x * (((x * y) * x) * y) True
+
+#18: x * y = (x * (y * x)) * z → x * y = (x * (x * z)) * x False
+
+#19: x * (y * z) = (x * x) * z → x * (y * z) = (y * y) * x False
+
+#20: x = y * ((y * x) * (x * y)) → x = (y * (x * y)) * x False
+
+#21: x * y = (y * (y * x)) * x → x * y = (x * y) * (x * y) False
+
+#22: x = (x * y) * (z * z) → x * x = x * ((y * z) * w) True
+
+#23: x = y * (y * ((x * y) * x)) → x = x * ((y * z) * (z * x)) False
+
+#24: x = ((y * (z * z)) * x) * y → x = y * ((y * (z * x)) * z) False
+
+#25: x = ((x * (y * z)) * z) * x → x * x = x * (y * (y * x)) False
+
+#26: x = x * (y * (x * z)) → x = ((x * y) * (z * w)) * u True
+
+#27: x * y = z * ((x * x) * y) → x * (x * y) = (y * x) * y False
+
+#28: x = (y * y) * ((z * x) * x) → x * y = (y * (z * x)) * y False
+
+#29: x = (y * (x * (y * x))) * y → x * (x * y) = z * (y * x) False
+
+#30: x = ((y * x) * x) * (x * z) → x = y * ((x * z) * (z * w)) False
+
+#31: x = ((y * x) * x) * (x * z) → x * y = (z * z) * z False
+
+#32: x = ((y * (z * y)) * y) * x → x = (y * ((z * w) * y)) * x False
+
+#33: x * y = (y * x) * z → x * y = z * ((w * y) * y) True
+
+#34: x = x * ((y * z) * (w * u)) → x = (x * (x * (y * x))) * x True
+
+#35: x * x = y * (z * (x * z)) → x * x = x * (y * (z * x)) False
+
+#36: x = y * (((y * z) * y) * x) → x = x * (x * (y * (y * x))) False
+
+#37: x * y = (x * (x * y)) * z → x * y = x * (z * (y * y)) False
+
+#38: x = x * ((x * y) * (z * z)) → x = x * (((x * y) * x) * y) False
+
+#39: x = x * ((y * (z * w)) * w) → x * y = (x * (z * w)) * u True
+
+#40: x = (((y * x) * y) * z) * x → x * y = z * (w * (z * y)) True
+
+#41: x = (y * x) * (x * z) → x = x * (y * (x * (y * z))) False
+
+#42: x * x = y * (x * (z * w)) → x * x = y * ((x * x) * z) False
+
+#43: x = (y * (y * z)) * x → x = (((x * y) * x) * x) * x True
+
+#44: x = (y * x) * (x * (x * z)) → x = (x * (y * z)) * (w * w) False
+
+#45: x * y = y * ((x * y) * z) → x * x = y * (y * (y * y)) True
+
+#46: x = (y * x) * (x * (z * z)) → x = y * ((y * x) * (z * y)) False
+
+#47: x = (y * (z * y)) * x → x = (((y * z) * y) * y) * x False
+
+#48: x * (y * z) = (z * x) * y → x * (y * z) = (w * u) * y False
+
+#49: x = x * (((y * z) * w) * u) → x = ((x * x) * (x * y)) * y True
+
+#50: x * y = ((x * z) * w) * y → x * y = ((z * w) * x) * y False
+
+#51: x = (y * x) * (y * x) → x = ((x * y) * x) * (z * x) True
+
+#52: x * y = (x * z) * (y * w) → x * y = (x * y) * (z * x) False
+
+#53: x * y = ((z * w) * x) * u → x * (y * y) = (x * x) * x True
+
+#54: x = y * (((z * w) * x) * x) → x = y * (((z * x) * w) * w) False
+
+#55: x = (y * (y * z)) * (w * x) → x = y * (z * (w * (u * x))) True
+
+#56: x = y * ((z * y) * (y * x)) → x = y * (x * ((z * w) * x)) False
+
+#57: x * (y * z) = (w * w) * z → x * (y * x) = (x * z) * x False
+
+#58: x = ((y * z) * z) * x → x = x * ((y * (y * x)) * x) True
+
+#59: x = (((y * z) * x) * z) * x → x = y * (((x * y) * y) * x) True
+
+#60: x = x * (y * (z * (x * y))) → x = x * (((y * x) * z) * w) True
+
+#61: x = ((y * x) * z) * (z * y) → x = (y * (y * (x * x))) * x False
+
+#62: x = ((y * z) * w) * x → x = y * ((z * (w * u)) * x) True
+
+#63: x = x * ((y * z) * (z * z)) → x = (x * ((y * y) * x)) * x True
+
+#64: x = x * (y * (z * y)) → x = (x * (x * (x * y))) * x True
+
+#65: x = ((y * z) * y) * (x * z) → x = (((y * x) * y) * y) * y False
+
+#66: x = (y * (y * x)) * (z * x) → x * y = z * (y * (w * y)) True
+
+#67: x * x = y * ((x * z) * y) → x * (y * x) = x * (z * x) False
+
+#68: x = ((y * y) * z) * x → x = y * (y * (z * (w * x))) True

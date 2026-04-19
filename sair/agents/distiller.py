@@ -270,14 +270,15 @@ def synthesize_cheat_sheet_entry(
         f"Cluster: {title} {split_note}\n\n"
         f"Representative problems (with ground truth):\n{examples_block}\n\n"
         f"Evidence from the symbolic solver:\n{evidences_block}\n\n"
-        "Write heuristic notes (PATTERN / TRUE-WHEN / FALSE-WHEN / KEY-STEPS) "
-        "that capture what makes E1 imply E2 or fail to. "
-        "Plain prose only — no VERDICT markers, no <answer> tags."
+        "Write a compact cheat-sheet block for this cluster in the same format "
+        "as a SAIR reasoning answer. Include a short <think> section and an "
+        "<answer> section with VERDICT, REASONING, and either PROOF or "
+        "COUNTEREXAMPLE. Prefer concrete algebraic patterns, small Cayley-table "
+        "counterexamples, and reusable proof strategies."
     )
 
-    # Use the synthesis-specific system prompt, NOT the judgment system prompt.
     messages: list[dict[str, str]] = [
-        {"role": "system", "content": SYNTHESIS_SYSTEM_PROMPT},
+        {"role": "system", "content": str(cfg.system_prompt)},
         {"role": "user", "content": user_prompt},
     ]
 
@@ -306,8 +307,7 @@ def synthesize_cheat_sheet_entry(
         outputs[0, prompt_len:], skip_special_tokens=True
     ).strip()
 
-    # Remove any judgment-format artifacts that leaked through.
-    decoded = _strip_verdict_blocks(decoded)
+    # decoded = _strip_verdict_blocks(decoded)
 
     # Hard byte cap so the final render stays under 10KB.
     encoded: bytes = decoded.encode("utf-8")

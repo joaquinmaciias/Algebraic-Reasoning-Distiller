@@ -98,10 +98,8 @@ def _cluster_problems(
 
 
 def _render_cluster_title(key: str, problems: list[Problem]) -> str:
-    """Human-readable section title showing the TRUE/FALSE split."""
-    n_true = sum(1 for p in problems if p.answer is True)
-    n_false = sum(1 for p in problems if p.answer is False)
-    return f"Lemma pack {key} (T:{n_true} F:{n_false})"
+    """Human-readable section title."""
+    return f"Lemma pack {key} ({len(problems)} problems)"
 
 
 def _collect_evidences(

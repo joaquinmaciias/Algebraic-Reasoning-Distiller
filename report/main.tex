@@ -1,0 +1,137 @@
+\PassOptionsToPackage{numbers,sort&compress}{natbib}
+\documentclass{article}
+
+\usepackage[final]{neurips_2025}
+
+\makeatletter
+\renewcommand{\@notice}{}
+\makeatother
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{babel}
+
+% \addto\captionsspanish{%
+%   \renewcommand{\tablename}{Tabla}%
+%   \renewcommand{\figurename}{Figura}%
+% }
+
+\usepackage{microtype}
+\usepackage{amsmath,amssymb,amsfonts,bm}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{graphicx}
+\usepackage{subcaption}
+\usepackage{url}
+\usepackage{hyperref}
+\usepackage{natbib}
+\usepackage{float}
+\usepackage{placeins}
+
+\renewcommand{\topfraction}{0.9}
+\renewcommand{\bottomfraction}{0.8}
+\renewcommand{\textfraction}{0.07}
+\renewcommand{\floatpagefraction}{0.8}
+
+\captionsetup{justification=centering}
+
+% Reduce espacio alrededor de figuras y tablas (sin romper NeurIPS)
+\setlength{\textfloatsep}{10pt plus 2pt minus 2pt}
+\setlength{\floatsep}{8pt plus 2pt minus 2pt}
+\setlength{\intextsep}{10pt plus 2pt minus 2pt}
+
+% Reduce espacio de captions
+\setlength{\abovecaptionskip}{5pt}
+\setlength{\belowcaptionskip}{0pt}
+
+\title{Algebraic Reasoning Distiller: Harnessing multi-agent collaboration for enhanced mathematical problem-solving}
+
+% \author{
+% José Andrés Ridruejo - Joaquín Mir - Javier Ríos - Miguel Montes\\
+% Final Project --- Deep Generative Models \\
+% }
+\author{%
+  Joaquín Mir Macías \\
+%   M\'aster en Inteligencia Artificial\\
+%   Universidad Pontificia Comillas - ICAI\\
+  \texttt{joaquinmirmacias@icai.alu.comillas.es} \\
+  \And
+  Jose Andrés Ridruejo Tuñón \\
+%   M\'aster en Inteligencia Artificial\\
+%   Universidad Pontificia Comillas - ICAI\\
+  \texttt{202111246@alu.comillas.edu} \\
+  \And
+  Javier Rios Montes \\
+%   M\'aster en Inteligencia Artificial\\
+%   Universidad Pontificia Comillas - ICAI\\
+  \texttt{202111258@alu.comillas.edu} \\
+  \And
+  Miguel Montes Lorenzo \\
+%   M\'aster en Inteligencia Artificial\\
+%   Universidad Pontificia Comillas - ICAI\\
+  \texttt{miguelmonteslorenzo@alu.comillas.edu} \\
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+    This project explores the potential of multi-agent collaboration in enhancing the mathematical problem-solving capabilities of large language models (LLMs). We propose a pipeline that integrates six different agents, each specializing in a distinct aspect of mathematical reasoning, to collaboratively solve complex problems. The agents include a Planner, a Counterexample Generator, a Symbolic Prover, a RAG Retriever, an Aggregator, and a Distiller. All this is done in order to solve the problems of the Mathematics Distillation Challenge - Equational Theories.
+    % Completar después con métricas y demás
+\end{abstract}
+
+\section{Introduction}
+
+In the last few years, large language models (\textbf{LLMs}) have positioned themselves as powerful tools for a wide range of natural language processing tasks. However, their performance in \textit{mathematical problem-solving} has been limited by their inability to perform complex reasoning and to handle symbolic manipulation effectively. Unlike human mathematicians, who are able to explicitly take into account symbolic rules and logical deductions, LLMs often operate as parrots (though stochastic ones, we must admit), aproximating solutions based on patterns rather than understanding the underlying mathematical principles. This shows in consistent errors in even simple arithmetic, spatial reasoning and symbolic manipulation tasks. Even frontier models like GPT-5 have shown these limitations, which suggests memorized reasoning templates rather than abstract understanding.
+
+To overcome these issues, two main approaches have been explored in the literature: \textbf{pretraining} and \textbf{fine-tuning}. Pretraining involves training a model on a large corpus of mathematical texts, allowing it to learn general mathematical concepts and patterns. However, this approach can be computationally expensive. On the other hand, given both a pretrained model and a curated dataset of mathematical problems, fine-tuning allows the model to adapt to specific mathematical tasks, improving its performance without the need for extensive computational resources. This latter approach initially implied trading off generalization for specialization, turning the model into a \textit{narrow expert}.
+
+Recent work, though, introduced a novel paradigm that combines the strengths of both approaches: \textbf{Supervised Fine-tuning}. First theorically proposed by \citet{stiennon2020learning} and further implemented with \textbf{InstructGPT} \cite{instructgpt2022}, this method involves using a curated dataset of outputs (examples of an LLM behaving as desired) to fine-tune a pretrained model. Given that this process just tunes the model to emulate a correct style, rathen than to solve a particular task, it does not lose its generic problem-solving capabilities. In fact, it can even enhance them by providing the model with a better understanding of how to approach problems in a structured way.
+
+Our project builds upon this idea of supervised fine-tuning, but takes it a step further by introducing a multi-agent collaboration framework. Instead of relying on a single model to solve mathematical problems, we propose a system where multiple specialized agents work together to tackle different aspects of the problem-solving process. Each agent is designed to handle specific tasks. By leveraging the strengths of each agent and allowing them to collaborate, we aim to create a more robust and effective system for mathematical problem-solving. In particular, we will apply this framework to the \textbf{Mathematics Distillation Challenge - Equational Theories} \cite{sair2026competition}, which presents a set of complex mathematical problems that require a deep understanding of equational theories.
+
+\subsection{Problem Statement}
+
+Let a \textbf{magma} be a set $M$ equipped with a binary operation $\cdot : M \times M \to M$ (no associativity, commutativity or identity element are assumed). An \textbf{equational theory} is a set of equations that hold for all elements of the magma. The goal of the Mathematics Distillation Challenge - Equational Theories is to develop a system that can effectively solve problems related to equational theories. Specifically, given two equations $E_1$ and $E_2$, the system should determine whether $E_1$ implies $E_2$ under every interpretation of the magma (this is, if every magma satisfying $E_1$ also satisfies $E_2$). A given example of this problem is the following:
+
+\begin{equation}
+    \begin{aligned}
+        x * y       & = z * (w * (u * u)) \\
+        x * (y * y) & = (z * w) * z
+    \end{aligned}
+\end{equation}
+In this case, the equation is \textbf{True}. The system must generate a cheatsheet that contains the necessary information to solve this kind of problems (which is then fed to a constrained LLM that must solve the problem based on the information in the cheatsheet). The cheatsheet should include relevant definitions, properties, and examples of equational theories, as well as any other information that can help the LLM to understand and solve the problem effectively.
+
+The competition operates under a set of constraints that limit the computational resources available to the participants:
+\begin{itemize}
+    \item The generated cheatsheet must be static and no greater than 10 KB in size.
+    \item No tools may be used during the evaluation phase, and the LLM must rely solely on the information provided in the cheatsheet to solve the problem.
+    \item The budget for each problem is limited to 10 minutes and the equivalent of $0.01$ USD in computational resources.
+\end{itemize}
+
+These constraints motivate our approach of \textit{offline} distillation: the computationally expensive parts of the process (counterexample search, RAG,multi-agent reasoning, etc.) are performed during the training phase. during the evaluation phase, the system only needs the use of a cheatsheet and a single call to the LLM.
+
+\section{Method}
+
+\subsection{System Architecture}
+
+\subsection{Architectural Details}
+
+\section{Experiments and Results}
+
+\subsection{Evaluation Metrics}
+
+\section{Discussion}
+
+\begin{itemize}
+    \item Limitation of our approach (similar to limitations of fine-tuning in comparison to pretraining: Curation of the dataset, computational cost, etc.)
+\end{itemize}
+
+\section{Conclusion}
+
+\bibliographystyle{unsrtnat}
+\bibliography{references}
+
+\end{document}

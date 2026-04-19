@@ -1,0 +1,251 @@
+You are a mathematician specializing in equational theories of magmas.
+Decide whether Equation 1 implies Equation 2 over all magmas (sets with
+a single binary operation *, no axioms assumed).
+
+## Known heuristics and patterns
+
+## Lemma pack vars3_m3_n4 (6 problems)
+<think>
+The evidence suggests that the implication does not hold for some magmas. A key observation is that the counterexamples often involve magmas where the operation is not associative or commutative. The relevant snippets show that the equations involve nested applications of the operation, which can lead to different outcomes depending on the magma's structure. A useful lemma might be that if a magma has a non-trivial element that behaves differently under different operations, the implication may fail.
+</think>
+
+<answer>
+VERDICT: FALSE
+
+REASONING: The evidence indicates that the implication fails for certain magmas, particularly those with non-trivial elements that behave differently under the operation. A key observation is that the counterexamples often involve magmas where the operation is not associative or commutative.
+
+PROOF: 
+- Consider the Cayley table of a magma where the operation is not associative or commutative.
+- For example, take the magma with Cayley table:
+  | 0 | 1 | 2
+  -------------
+  0 | 0 | 0 | 0
+  1 | 1 | 1 | 0
+  2 | 1 | 2 | 2
+- Assign x=1, y=2, z=0. Then, the left-hand side of Equation 1 evaluates to 1, while the right-hand side evaluates to 0, showing
+
+## Lemma pack vars4_m2_n4 (3 problems)
+<think>
+- Equation 1: x = y * (z * w)
+- Equation 2: x * (y * y) = y * (z * w)
+- Counterexample found for Equation 1 => Equation 2 using order-2 magma.
+- Strategy: Check if Equation 2 can be derived from Equation 1 or if it fails in a similar magma.
+</think>
+
+<answer>
+VERDICT: FALSE
+
+REASONING: Equation 2 cannot be derived from Equation 1 over all magmas. A counterexample exists where Equation 1 holds but Equation 2 fails.
+
+COUNTEREXAMPLE: Order-2 magma refutes E1 => E2.
+Cayley table:
+  | 0 | 1
+---------
+0 | 1 | 1
+1 | 0 | 0
+Failing assignment: w=0, x=0, y=0, z=0
+
+PROOF: None found by symbolic prover.
+</answer>
+
+## Lemma pack vars3_m2_n4 (3 problems)
+<think>
+Lemma: For magmas, if x = (y * (y * z)) * x, then x * y = y * ((y * x) * y).
+
+Reasoning:
+- Both sides involve nested applications of the binary operation.
+- Simplifying the left side using associativity might help.
+- The right side can be simplified similarly.
+- Check if the simplified forms are equivalent.
+</think>
+
+<answer>
+VERDICT: TRUE
+
+REASONING: 
+- Assume x = (y * (y * z)) * x.
+- Simplify both sides using associativity.
+- Left side: x = ((y * y) * (y * z)) * x.
+- Right side: x * y = y * ((y * x) * y).
+- Both sides simplify to x * x under associativity.
+- Thus, x * y = y * ((y * x) * y).
+
+PROOF:
+1. x = (y * (y * z)) * x
+2. x = ((y * y) * (y * z)) * x (by associativity)
+3. x = ((y * y) * y) * (y * z) * x (by associativity)
+4. x = y * ((y * y) * (y * z)) * x (by associativity)
+5. x = y * ((y * y) * y) * (y * z) * x (by associativity)
+6. x = y * ((y * y) * y) * (y * z) * x (by associativity)
+7. x = y * ((y * y) * y) * (y * z) * x (by associativity)
+8. x = y * ((y * y) * y) * (y * z) * x (by associativity)
+9. x = y * ((y * y) * y) * (y * z) * x (by associativity)
+10. x = y * ((y * y) * y) * (y * z) * x (by associativity)
+11. x = y * ((y * y) * y) * (y * z) * x (by associat
+
+## Lemma pack vars2_m3_n4 (3 problems)
+<think>
+The evidence suggests that the implication fails for order-3 magmas. The key observations are:
+
+- The counterexamples involve magmas with non-commutative operations.
+- The counterexamples often have elements mapping to themselves under the operation.
+- The counterexamples show that the left-hand side of the implication does not necessarily equal the right-hand side.
+
+A lemma that captures this is:
+- If a magma has an element x such that x * x = x, and there exists another element y where x * y ≠ y * x, then the implication fails.
+</think>
+
+<answer>
+VERDICT: FALSE
+
+REASONING: The counterexamples provided show that the implication does not hold for certain magmas. Specifically, when there is an element x such that x * x = x, and another element y where x * y ≠ y * x, the implication fails.
+
+PROOF: 
+- Consider the Cayley table:
+  | 0 | 1 | 2
+  -------------
+  0 | 0 | 0 | 0
+  1 | 1 | 1 | 0
+  2 | 1 | 0 | 0
+- Here, x=1, y=2 satisfies x * x = x but x * y ≠ y * x.
+- Thus, the implication does not hold.
+</answer>
+
+## Lemma pack vars4_m3_n4 (2 problems)
+<think>
+The problem involves comparing two equations over magmas. The evidence suggests that the first equation does not imply the second. Key observations:
+
+- The counterexample provided shows a specific magma where the first equation holds but the second fails.
+- The counterexample magma is order-3, suggesting small magmas can refute implications.
+- Relevant snippets show similar forms of equations, hinting at potential counterexamples.
+</think>
+
+<answer>
+VERDICT: FALSE
+
+REASONING: The given counterexample magma shows that the first equation holds but the second fails for certain assignments. This indicates that the first equation does not imply the second.
+
+PROOF: NONE NEEDED AS VERDICT IS BASED ON COUNTEREXAMPLE
+
+COUNTEREXAMPLE: 
+Cayley table:
+  | 0 | 1 | 2
+-------------
+0 | 1 | 2 | 0
+1 | 1 | 2 | 0
+2 | 1 | 2 | 0
+Failing assignment: w=0, x=0, y=0, z=0
+</answer>
+
+## Lemma pack vars3_m1_n4 (1 problems)
+<think>
+- Equation 1: x = y * x
+- Equation 2: x = x * (x * ((y * z) * x))
+- Evidence suggests no counterexample found for n=4.
+- Equation 1 implies x is idempotent under *.
+- Equation 2 involves nested operations with x.
+- Simplify Equation 2 using x's idempotency.
+</think>
+
+<answer>
+VERDICT: TRUE
+
+REASONING: 
+- Equation 1 implies x is idempotent: x = x * x.
+- Substitute into Equation 2: x = x * (x * ((y * z) * x)).
+- Simplify: x = x * (x * (y * z)).
+- Further simplify: x = x * (y * z).
+- Since x is idempotent, x = x * (y * z) holds.
+- Thus, Equation 1 implies Equation 2.
+
+PROOF:
+- x = y * x (Equation 1)
+- x = x * (x * ((y * z) * x)) (Equation 2)
+- x = x * (x * (y * z)) (idempotence)
+- x = x * (y * z) (idempotence)
+</answer>
+
+## Lemma pack vars2_m2_n4 (1 problems)
+<think>
+- Both equations involve self-referential expressions.
+- Equation 1 has form x = x * (x * y).
+- Equation 2 has form x = (x * ((x * x) * x)) * x.
+- Equation 2 seems more complex but potentially simpler due to nested structure.
+- Consider substituting x = x * (x * y) into Equation 2.
+- Simplify using associativity if possible.
+</think>
+
+<answer>
+VERDICT: TRUE
+
+REASONING: Substituting x = x * (x * y) into Equation 2 yields:
+x = (x * ((x * x) * x)) * x
+= ((x * (x * y)) * ((x * x) * x)) * x
+= ((x * (x * y)) * (x * (x * y))) * x
+= (x * (x * y)) * x
+= x * (x * y)
+which matches Equation 1.
+
+PROOF:
+x = (x * ((x * x) * x)) * x
+= ((x * (x * y)) * ((x * x) * x)) * x
+= ((x * (x * y)) * (x * (x * y))) * x
+= (x * (x * y)) * x
+= x * (x * y)
+</answer>
+
+## Lemma pack vars3_m3_n3 (1 problems)
+<think>
+- Both equations involve nested operations with variables.
+- The left side of both equations has a common structure: x = (some nested expression) * x.
+- The right side of both equations also involves nested operations but with different combinations of variables.
+- The counterexample provided suggests that the implication does not hold for all magmas.
+- The specific counterexample shows that even simple magmas can refute the implication.
+</think>
+
+<answer>
+VERDICT: FALSE
+
+REASONING: The counterexample provided shows that the implication does not hold for all magmas. Specifically, the order-3 magma with the given Cayley table refutes the implication when x=0, y=0, z=2.
+
+COUNTEREXAMPLE: Consider the magma M with Cayley table:
+  | 0 | 1 | 2
+-------------
+0 | 0 | 1 | 2
+1 | 0 | 1 | 2
+2 | 1 | 0 | 2
+
+For this magma, let x=0, y=0, z=2. Then:
+- LHS: x = 0
+- RHS: (0 * (0 * (0 * 0))) * 0 = (0 * (0 * 0)) * 0 = (0 * 0) * 0 = 0 * 0 = 0
+
+Since LHS = RHS in this case, the implication holds for this specific assignment. However, the counterexample shows that there exists at least one assignment where the implication fails, indicating that the overall implication is false.
+</answer>
+
+---
+
+## Problem
+
+Equation 1: {{ equation1 }}
+Equation 2: {{ equation2 }}
+
+## Required output format
+
+Respond with exactly:
+
+<think>
+Your reasoning here.
+</think>
+<answer>
+VERDICT: TRUE
+REASONING: ...
+PROOF: ...
+</answer>
+
+Or if false:
+
+<answer>
+VERDICT: FALSE
+REASONING: ...
+COUNTEREXAMPLE: ...
+</answer>

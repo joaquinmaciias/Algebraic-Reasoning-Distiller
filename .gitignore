@@ -6,6 +6,19 @@ __pycache__/
 *.pyd
 .Python
 
+# LaTex generated files
+*.aux
+*.lof
+*.log
+*.lot
+*.out
+*.toc
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.bbl
+*.blg
+
 # ── Virtual environments ──────────────────────────────────────────────────────
 .venv/
 venv/

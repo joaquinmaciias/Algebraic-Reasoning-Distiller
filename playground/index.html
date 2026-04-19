@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SAIR Playground · Algebraic Reasoning Evaluator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Inter:wght@300;400;500;600;700&display=swap"
+    rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+
+<body>
+  <div id="app-shell">
+
+    <!-- TOP NAV -->
+    <nav id="top-nav">
+      <div class="nav-brand">
+        <span class="nav-logo">&forall;</span>
+        <span class="nav-title">SAIR Playground</span>
+      </div>
+      <div class="nav-tabs">
+        <span class="nav-tab active" data-tab="run">Run</span>
+        <span class="nav-tab" data-tab="history">History</span>
+      </div>
+      <div class="nav-right">
+        <div id="status-badge" class="badge badge-idle">Idle</div>
+      </div>
+    </nav>
+
+    <!-- RUN TAB -->
+    <div id="tab-run-content" class="tab-content active">
+      <div class="main-layout">
+
+        <!-- LEFT PANEL: Config -->
+        <aside id="config-panel">
+
+          <!-- API URL -->
+          <section class="config-section">
+            <label class="config-label" for="api-url">API URL</label>
+            <input type="text" id="api-url" class="config-input" value="http://localhost:8182"
+              placeholder="http://host:port" />
+          </section>
+
+          <!-- Dataset -->
+          <section class="config-section">
+            <label class="config-label" for="dataset-select">Dataset</label>
+            <select id="dataset-select" class="config-select">
+              <option value="hard3">hard3</option>
+              <option value="hard2">hard2</option>
+              <option value="hard">hard</option>
+              <option value="normal">normal</option>
+              <option value="custom">custom</option>
+            </select>
+            <p class="config-hint">Cargados desde la API local (/datasets).</p>
+          </section>
+
+          <section id="custom-dataset-section" class="config-section hidden">
+            <label class="config-label" for="custom-dataset-input">Custom Dataset (JSON o JSONL)</label>
+            <textarea
+              id="custom-dataset-input"
+              class="config-textarea mono"
+              rows="8"
+              placeholder='[{"equation1":"x = y * x","equation2":"x = x * x","answer":true}]'
+            ></textarea>
+            <p class="config-hint">Campos requeridos por item: equation1, equation2. answer es opcional.</p>
+          </section>
+
+          <!-- Filter -->
+          <section class="config-section">
+            <label class="config-label">Ground Truth Filter</label>
+            <div class="radio-group">
+              <label><input type="radio" name="gt-filter" value="all" checked /> All</label>
+              <label><input type="radio" name="gt-filter" value="true" /> TRUE only</label>
+              <label><input type="radio" name="gt-filter" value="false" /> FALSE only</label>
+            </div>
+          </section>
+
+          <!-- Concurrency -->
+          <section class="config-section">
+            <label class="config-label" for="concurrency">Concurrency</label>
+            <input type="number" id="concurrency" class="config-input" value="1" min="1" max="10" />
+          </section>
+
+          <!-- Batch controls -->
+          <section class="config-section">
+            <button id="btn-run" class="btn btn-primary">Run Evaluation</button>
+            <button id="btn-stop" class="btn btn-danger" disabled>Stop</button>
+          </section>
+
+          <hr class="config-divider" />
+
+          <!-- Single test -->
+          <section class="config-section">
+            <h3 class="config-heading">Test Single Problem</h3>
+            <label class="config-label" for="eq1-input">Equation 1</label>
+            <input type="text" id="eq1-input" class="config-input mono" placeholder="x = y * x" />
+            <label class="config-label" for="eq2-input">Equation 2</label>
+            <input type="text" id="eq2-input" class="config-input mono" placeholder="x = x * (x * y)" />
+            <button id="btn-test" class="btn btn-secondary">Test</button>
+          </section>
+
+          <hr class="config-divider" />
+
+          <!-- Cheat Sheet -->
+          <section class="config-section">
+            <label class="config-label" for="cheatsheet-area">
+              Cheat Sheet
+              <button id="btn-load-cs" class="btn-link" title="Reload from server">&#8635;</button>
+            </label>
+            <textarea id="cheatsheet-area" class="config-textarea mono" rows="10"
+              placeholder="Loading cheat sheet..."></textarea>
+          </section>
+
+        </aside>
+
+        <!-- RIGHT PANEL: Results -->
+        <main id="results-panel">
+
+          <!-- Progress bar -->
+          <div id="progress-wrapper" class="hidden">
+            <div id="progress-bar">
+              <div id="progress-fill"></div>
+            </div>
+            <span id="progress-label">0 / 0</span>
+          </div>
+
+          <!-- Metrics row -->
+          <div id="metrics-row">
+            <div class="metric-card">
+              <span class="metric-value" id="m-accuracy">--</span>
+              <span class="metric-label">Accuracy</span>
+            </div>
+            <div class="metric-card">
+              <span class="metric-value" id="m-total">0</span>
+              <span class="metric-label">Total</span>
+            </div>
+            <div class="metric-card tp">
+              <span class="metric-value" id="m-tp">0</span>
+              <span class="metric-label">TP</span>
+            </div>
+            <div class="metric-card tn">
+              <span class="metric-value" id="m-tn">0</span>
+              <span class="metric-label">TN</span>
+            </div>
+            <div class="metric-card fp">
+              <span class="metric-value" id="m-fp">0</span>
+              <span class="metric-label">FP</span>
+            </div>
+            <div class="metric-card fn">
+              <span class="metric-value" id="m-fn">0</span>
+              <span class="metric-label">FN</span>
+            </div>
+          </div>
+
+          <!-- Confusion Matrix -->
+          <div id="confusion-matrix">
+            <div class="cm-header"></div>
+            <div class="cm-header">Pred TRUE</div>
+            <div class="cm-header">Pred FALSE</div>
+            <div class="cm-header">Actual TRUE</div>
+            <div class="cm-cell cm-tp" id="cm-tp">0</div>
+            <div class="cm-cell cm-fn" id="cm-fn">0</div>
+            <div class="cm-header">Actual FALSE</div>
+            <div class="cm-cell cm-fp" id="cm-fp">0</div>
+            <div class="cm-cell cm-tn" id="cm-tn">0</div>
+          </div>
+
+          <!-- Single test result -->
+          <div id="single-result" class="hidden">
+            <h3>Single Test Result</h3>
+            <div id="single-result-body"></div>
+          </div>
+
+          <!-- Results table -->
+          <div id="results-table-wrapper">
+            <table id="results-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Equation 1</th>
+                  <th>Equation 2</th>
+                  <th>Truth</th>
+                  <th>Predicted</th>
+                  <th>Match</th>
+                </tr>
+              </thead>
+              <tbody id="results-tbody"></tbody>
+            </table>
+          </div>
+
+        </main>
+      </div>
+    </div>
+
+    <!-- HISTORY TAB -->
+    <div id="tab-history-content" class="tab-content">
+      <div id="history-list"></div>
+      <button id="btn-clear-history" class="btn btn-danger">Clear History</button>
+    </div>
+
+  </div>
+
+  <script src="script.js"></script>
+</body>
+
+</html>

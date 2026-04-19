@@ -115,20 +115,26 @@ def _answer_problem_local(
         {"role": "user", "content": user_prompt},
     ]
 
-    input_ids: torch.Tensor = tokenizer.apply_chat_template(
+    model_inputs: Any = tokenizer.apply_chat_template(
         conversation=messages,
         tokenize=True,
         add_generation_prompt=True,
         return_tensors="pt",
+        return_dict=True,
     ).to(model.device)
+    input_ids: torch.Tensor = model_inputs["input_ids"]
 
-    outputs: torch.Tensor = model.generate(
-        input_ids=input_ids,
-        max_new_tokens=int(cfg.max_new_tokens),
-        pad_token_id=int(tokenizer.pad_token_id),
-        eos_token_id=int(tokenizer.eos_token_id),
-        do_sample=False,
-    )
+    gen_kwargs: dict[str, Any] = {
+        "input_ids": input_ids,
+        "max_new_tokens": int(cfg.max_new_tokens),
+        "pad_token_id": int(tokenizer.pad_token_id),
+        "eos_token_id": int(tokenizer.eos_token_id),
+        "do_sample": False,
+    }
+    if "attention_mask" in model_inputs:
+        gen_kwargs["attention_mask"] = model_inputs["attention_mask"]
+
+    outputs: torch.Tensor = model.generate(**gen_kwargs)
     prompt_len: int = int(input_ids.shape[-1])
     return tokenizer.decode(
         outputs[0, prompt_len:], skip_special_tokens=True

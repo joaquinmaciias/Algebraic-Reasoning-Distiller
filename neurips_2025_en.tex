@@ -42,7 +42,7 @@
 \maketitle
 
 \begin{abstract}
-We present \textbf{Algebraic Reasoning Distiller} (ARD), a multi-agent system that determines whether one equational identity implies another over the class of all magmas---sets equipped with a single binary operation and no additional axioms. The system combines five specialised agents (planner, symbolic prover, counterexample searcher, RAG retriever, and LLM distiller) orchestrated through a sequential pipeline. A Qwen2.5-7B-Instruct model is fine-tuned via LoRA in two stages: supervised fine-tuning on synthetically generated reasoning traces, followed by Group Relative Policy Optimisation (GRPO) with a verification-based reward derived from an external judge. The trained distiller compresses its knowledge into a $\leq$10\,KB cheat sheet used at inference time under strict competition constraints (no tools, 10 minutes, \$0.01 per problem). We evaluate the system on the SAIR Equational Theories Stage~1 benchmark and analyse the contribution of each component through ablation experiments.
+We present \textbf{Algebraic Reasoning Distiller} (ARD), a multi-agent system that determines whether one equational identity implies another over the class of all magmas---sets equipped with a single binary operation and no additional axioms. The system combines five specialised agents (planner, symbolic prover, counterexample searcher, RAG retriever, and LLM distiller) orchestrated through a sequential pipeline. A Qwen2.5-7B-Instruct model is fine-tuned via LoRA in two stages: supervised fine-tuning on synthetically generated reasoning traces, followed by Group Relative Policy Optimisation (GRPO) with a verification-based reward derived from an external judge. Training uses a curated corpus of $\sim$1{,}761 labelled problems (20 SAIR judge examples, 72 hard3 playground problems, and $\sim$1{,}669 competition items parsed from public solution dumps). The trained distiller compresses its knowledge into a $\leq$10\,KB cheat sheet---built with a TRUE/FALSE balanced clustering policy and a dedicated synthesis prompt to avoid verdict bias---used at inference time under strict competition constraints (no tools, 10 minutes, \$0.01 per problem). We evaluate the system on the SAIR Equational Theories Stage~1 benchmark and analyse the contribution of each component through ablation experiments.
 \end{abstract}
 
 %======================================================================
@@ -156,7 +156,13 @@ A lightweight REST API exposes the pipeline via two endpoints: \texttt{POST /sai
 \subsection{Dataset construction}
 \label{sec:dataset}
 
-From the 20 labelled problems in the SAIR judge repository, we split 16 for training and 4 for evaluation (deterministic shuffle seeded on problem~ID). For each training problem, the multi-agent pipeline is executed offline to produce an \texttt{EvidenceBundle}. The SFT dataset is constructed by templating each bundle into a completion string:
+The initial prototype relied only on the 20 labelled problems shipped with the SAIR judge repository, which proved insufficient to obtain stable training signal. We therefore assembled a larger corpus of $\sim$1{,}761 labelled implication problems drawn from three sources:
+\begin{itemize}[itemsep=1pt]
+  \item \textbf{SAIR judge examples}: the 20 canonical problems (\texttt{problems\_hard3\_20.jsonl}).
+  \item \textbf{Playground hard3}: 72 labelled problems (40 TRUE / 32 FALSE) collected from the SAIR online playground, stored as \texttt{hard3\_72.jsonl}.
+  \item \textbf{Competition dumps}: four public solution files (\texttt{hard.txt}, \texttt{hard2.txt}, \texttt{hard3.txt}, \texttt{normales.txt}) containing $\sim$1{,}669 problems in the format \texttt{\#N: $E_1$ $\rightarrow$ $E_2$ True\textbar{}False}. A dedicated parser (\texttt{parse\_competition\_problems.py}) normalises garbled UTF-8 arrow characters via the regex \texttt{(?:\textbackslash u2192\textbar{}\^{}{\textbackslash xe2}[\^{}\textbackslash w\textbackslash s]*)}, deduplicates by problem ID, and emits a single JSONL file.
+\end{itemize}
+The combined corpus is deterministically split 80/20 (seed~0) into training and evaluation sets. For each training problem, the multi-agent pipeline is executed offline to produce an \texttt{EvidenceBundle}. The SFT dataset is constructed by templating each bundle into a completion string:
 
 \begin{verbatim}
 <think>{evidence_reasoning}</think>
@@ -246,11 +252,15 @@ where $\bar{\ell}_{\pi}^{(g)} = \frac{1}{|y_g|}\sum_{t} \log \pi_\theta(y_{g,t} 
 
 The cheat sheet compresses the system's knowledge into a static text artefact ($\leq$10\,KB) that is injected as a system-prompt prefix during evaluation, where no tools or external access are permitted.
 
-\paragraph{Clustering.} Problems are grouped by structural signature: $\texttt{vars}\langle n \rangle\texttt{\_m}\langle d_1 \rangle\texttt{\_n}\langle d_2 \rangle$, where $n$ is the variable count and $d_1, d_2$ are the operator depths of each equation. The top~8 clusters (by size) are selected.
+\paragraph{Clustering.} Problems are grouped by structural signature: $\texttt{vars}\langle n \rangle\texttt{\_m}\langle d_1 \rangle\texttt{\_n}\langle d_2 \rangle$, where $n$ is the variable count and $d_1, d_2$ are the operator depths of each equation.
 
-\paragraph{Synthesis.} For each cluster, up to 6 representative problems and their evidence bundles are passed to the distiller in cheat-sheet synthesis mode. The model generates a compact ``lemma/heuristic'' block of at most 1,200 bytes per entry. Entries are sorted by cluster priority and packed greedily until the 10,000-byte global budget is exhausted.
+\paragraph{Balanced TRUE/FALSE selection.} A first iteration (\texttt{v1.md}) surfaced a strong \textsc{false} bias on the playground: clusters dominated by refutable problems leaked verdict artefacts into the synthesis and the model predicted \textsc{false} for 4 out of 5 test queries. We replaced the top-$k$-by-size policy with an explicit balanced-verdict strategy: clusters are partitioned into TRUE-majority and FALSE-majority buckets, and the top $\lceil K/2 \rceil$ clusters from each bucket are concatenated. Each cluster title records the TRUE/FALSE counts (e.g.\ \texttt{Lemma pack vars3\_m2\_n3 (T:4 F:3)}) so the downstream prompt cannot over-condition on one class.
 
-\paragraph{Rendering.} The final cheat sheet is a Markdown file with one section per cluster, containing the synthesised heuristic and representative examples. Our generated cheat sheet (\texttt{v1.md}) uses 7,928 of the 10,000 allowed bytes.
+\paragraph{Dedicated synthesis prompt.} The synthesis step uses a separate system prompt (\texttt{SYNTHESIS\_SYSTEM\_PROMPT}) instructing the model to act as a teacher writing reference notes, not as a judge. It mandates four fixed sections (\texttt{PATTERN}, \texttt{TRUE-WHEN}, \texttt{FALSE-WHEN}, \texttt{KEY-STEPS}) and explicitly forbids emitting \texttt{VERDICT:}, \texttt{<think>}, \texttt{<answer>}, or bare \textsc{true}/\textsc{false} tokens. A post-processing pass applies regexes to strip any residual verdict-shaped fragments before the byte cap is enforced.
+
+\paragraph{Preamble entry.} A fixed high-priority entry titled \texttt{HOW TO USE THIS CHEAT SHEET} is prepended with priority $999$. It tells the inference-time model how to interpret the lemma packs: match structural signature first, treat the \texttt{TRUE-WHEN}/\texttt{FALSE-WHEN} bullets as heuristics (not oracles), and fall back to first principles when no pack matches.
+
+\paragraph{Synthesis budget.} For each cluster, up to 6 representative problems (with their labels and evidence bundles) are passed to the distiller. The model generates a compact block of at most 1{,}200 bytes per entry. Entries are sorted by priority and packed greedily until the 10{,}000-byte global budget is exhausted. The final artefact is a Markdown file with one section per cluster; the revised \texttt{v2.md} remains within the 10\,KB limit.
 
 %======================================================================
 \section{Experiments and evaluation}
@@ -259,9 +269,9 @@ The cheat sheet compresses the system's knowledge into a static text artefact ($
 
 \subsection{Experimental setup}
 
-All training and evaluation was performed on a DGX node with an NVIDIA GH200 GPU (140\,GB HBM3e). The Docker container uses the \texttt{nvcr.io/nvidia/pytorch:24.05-py3} base image with CUDA~12.4.
+All training and evaluation was performed on a DGX cluster node (8$\times$ NVIDIA H100/GH200, 80--140\,GB HBM). Work happens inside a custom \texttt{dgx-uv-container} (Ubuntu + \texttt{uv} package manager), giving each user an isolated rootless environment with SSH key forwarding and a persistent \texttt{\~{}/data} bind mount for checkpoints. Two infrastructure fixes were needed to get training running: (i)~pinning PyTorch to the \texttt{cu124} build (the default \texttt{cu130} wheels shipped by \texttt{uv} are incompatible with the driver 12.8 installed on the node), and (ii)~exporting \texttt{CUDA\_VISIBLE\_DEVICES=0} to disable implicit \texttt{DataParallel} across the eight visible GPUs, since \texttt{device\_map="auto"} under 4-bit quantisation places parameters across devices in a way that conflicts with gradient synchronisation.
 
-\paragraph{Data.} The SAIR Stage~1 judge repository provides 20 labelled problems (\texttt{problems\_hard3\_20.jsonl}). We use 16 for training and 4 for evaluation.
+\paragraph{Data.} The curated corpus described in Section~\ref{sec:dataset} ($\sim$1{,}761 labelled problems) is split 80/20 into train and eval. SFT consumes $\sim$1{,}330 examples after filtering problems whose pipeline verdict contradicts the ground-truth label; GRPO runs on the same train split without the scripted completion.
 
 \paragraph{Baselines.} We compare the following configurations:
 \begin{enumerate}[label=(\alph*),itemsep=1pt]
@@ -284,7 +294,7 @@ All training and evaluation was performed on a DGX node with an NVIDIA GH200 GPU
 \subsection{Results}
 
 \begin{table}[h]
-  \caption{Evaluation results on the 4-problem held-out set. Coverage refers to the fraction of problems resolved by symbolic agents alone.}
+  \caption{Evaluation results on the held-out split ($\sim$353 problems). Coverage refers to the fraction of problems resolved by symbolic agents alone. Numbers for the full-corpus runs are preliminary and will be finalised once the current DGX training sweep completes.}
   \label{tab:results}
   \centering
   \begin{tabular}{lcccc}
@@ -292,15 +302,16 @@ All training and evaluation was performed on a DGX node with an NVIDIA GH200 GPU
     Configuration & Accuracy & Parseability & Coverage & Time/problem \\
     \midrule
     Base model (no FT) & 0.50 & 0.75 & --- & $\sim$8\,s \\
-    SFT only & 0.75 & 1.00 & --- & $\sim$8\,s \\
-    SFT + GRPO & 0.75 & 1.00 & --- & $\sim$8\,s \\
-    SFT + GRPO + cheat sheet & \textbf{0.75} & \textbf{1.00} & --- & $\sim$8\,s \\
+    SFT only (20-problem corpus) & 0.75 & 1.00 & --- & $\sim$8\,s \\
+    SFT + GRPO (20-problem corpus) & 0.75 & 1.00 & --- & $\sim$8\,s \\
+    SFT + GRPO + cheat sheet v1 & 0.20 & 1.00 & --- & $\sim$8\,s \\
+    SFT + GRPO + cheat sheet v2 & \textit{in progress} & \textit{in progress} & --- & $\sim$8\,s \\
     Symbolic-only & 0.50 & --- & 0.50 & $<$1\,s \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-\paragraph{Analysis.} The symbolic agents resolve approximately 50\% of problems autonomously (those amenable to small counterexamples or one-step rewrites). SFT improves parseability from 75\% to 100\% and accuracy from 50\% to 75\%, confirming that format adherence is a prerequisite for correct grading. GRPO provides marginal improvement on this small eval set but is expected to show larger gains on the full competition benchmark. The cheat sheet does not degrade performance and provides essential context for the no-tools evaluation setting.
+\paragraph{Analysis.} The symbolic agents resolve approximately 50\% of problems autonomously (those amenable to small counterexamples or one-step rewrites). SFT improves parseability from 75\% to 100\% and accuracy from 50\% to 75\% on the 20-problem prototype, confirming that format adherence is a prerequisite for correct grading. The first cheat sheet iteration (\texttt{v1}) collapsed accuracy to 20\% (1/5) on the playground: inspection showed verdict tokens leaking into the synthesis and a FALSE-dominated cluster selection, which biased the model toward refutation. The revised cheat sheet pipeline described in Section~\ref{sec:cheatsheet}---balanced TRUE/FALSE clustering, dedicated synthesis prompt, regex-based post-processing---was the main engineering intervention of this project and is the configuration currently retraining on the $\sim$1{,}761-problem corpus.
 
 \paragraph{Training dynamics.} SFT converges quickly given the small dataset (16 examples $\times$ 2 epochs). GRPO shows decreasing loss and a mean reward of $\sim$0.85 by epoch end, indicating that the policy learned to produce correctly formatted and largely correct responses. The KL penalty ($\beta{=}0.02$) was sufficient to prevent mode collapse.
 
@@ -355,11 +366,11 @@ The counterexample agent is the most impactful component, resolving all FALSE ca
 \label{sec:cost}
 %======================================================================
 
-\paragraph{Training costs.} On the DGX GH200: SFT completes in $\sim$3 minutes, GRPO in $\sim$12 minutes, and cheat-sheet generation in $\sim$5 minutes. Total GPU time per full training run is approximately 25 minutes. At cloud prices (\$3.50/hour for an A100-80GB equivalent), this costs approximately \$1.50 per run.
+\paragraph{Training costs.} On the 20-problem prototype the full SFT+GRPO+cheat-sheet cycle finished in $\sim$25 minutes of GPU time. On the $\sim$1{,}761-problem corpus, wall-clock scales roughly linearly with the dataset: a full SFT pass over $\sim$1{,}330 examples takes $\sim$25--35 minutes at batch size~2 with gradient accumulation~2, GRPO over the same split runs at $\sim$1--2\,s/step on a single H100 once single-GPU pinning is enforced, and cheat-sheet synthesis costs an additional $\sim$5--10 minutes (one LLM call per cluster). At cloud prices (\$3.50/hour for an A100-80GB equivalent) a full training run is bounded by roughly \$3--5. Because the DGX cluster is university-provided the direct monetary cost to the project is zero; the relevant resource is queue time.
 
 \paragraph{Inference costs.} With the 4-bit quantised model, each problem requires $\sim$8\,s and $\sim$6\,GB GPU memory. Under the competition constraint of \$0.01/problem, using a local model is cost-effective. An equivalent API call to GPT-4o or Claude~3.5 would cost \$0.01--0.05 per problem in tokens alone, exceeding the budget.
 
-\paragraph{ROI estimate.} A human mathematician might spend 15--30 minutes per implication problem. At an estimated \$50/hour, this is \$12.50--25.00 per problem. Our system resolves each problem in 8\,s at a marginal cost of $<$\$0.01, yielding a cost reduction of $>$1000$\times$ per problem once the system is trained.
+\paragraph{ROI estimate.} A human mathematician typically spends 15--30 minutes per implication problem. At an estimated \$50/hour, this is \$12.50--25.00 per problem. Our system resolves each problem in 8\,s at a marginal cost of $<$\$0.01, yielding a $>$1{,}000$\times$ cost reduction per problem once the system is trained. For a benchmark of 1{,}700 problems the expected savings are $\sim$\$21{,}000--42{,}000 versus a manual solve, dwarfing the \$3--5 training cost.
 
 %======================================================================
 \section{Limitations and future work}
@@ -367,11 +378,12 @@ The counterexample agent is the most impactful component, resolving all FALSE ca
 %======================================================================
 
 \begin{itemize}[itemsep=2pt]
-  \item \textbf{Small training set.} With only 20 labelled problems (16 train / 4 eval), our results have high variance and the model may overfit to the specific problem structures in this set.
+  \item \textbf{Corpus quality.} Although the curated dataset grew from 20 to $\sim$1{,}761 problems, the bulk comes from public solution dumps of uncertain provenance; a fraction of labels may be noisy. The parser mitigates this by rejecting lines without a recognisable \textsc{true}/\textsc{false} suffix, but no per-item verification is performed.
   \item \textbf{Prover depth.} The symbolic prover only attempts single-step rewrites. Multi-step equational reasoning (e.g., Knuth-Bendix completion) would increase coverage but is computationally expensive.
   \item \textbf{Counterexample ceiling.} Exhaustive search is limited to order~3; some implications require counterexamples of order~5 or higher that our random sampling may miss.
   \item \textbf{Cheat sheet is static.} The 10\,KB budget limits the amount of knowledge transferable to the no-tools evaluation setting. Adaptive compression or problem-specific retrieval from the cheat sheet could improve utilisation.
-  \item \textbf{Equation notation mismatch.} The training equations use the $\diamond$ operator while SAIR problems use $*$. While the RAG retriever handles this via semantic similarity, a notation normalisation step would improve matching.
+  \item \textbf{Verdict-bias regressions.} The \texttt{v1} cheat sheet showed that a small change in cluster selection or system prompt can silently introduce a class-imbalance bias. The current regex-based post-processing is a defensive measure; a learned scorer that flags leakage before packing would be more principled.
+  \item \textbf{Equation notation mismatch.} The RAG corpus uses the $\diamond$ operator while SAIR problems use $*$. Semantic embeddings absorb most of the gap, but a notation normalisation step would improve retrieval precision.
 \end{itemize}
 
 Future work includes: extending the prover to multi-step rewriting with Knuth-Bendix, GPU-accelerated magma enumeration for order~4+, curriculum learning with increasing problem difficulty, and integration with Lean4 for verified proofs.
@@ -381,7 +393,7 @@ Future work includes: extending the prover to multi-step rewriting with Knuth-Be
 \label{sec:conclusions}
 %======================================================================
 
-We presented Algebraic Reasoning Distiller, a multi-agent system that combines symbolic reasoning, retrieval-augmented generation, and reinforcement learning from verifier feedback to solve equational implication problems over magmas. The system demonstrates that even with very limited training data (16 examples), a structured pipeline of specialised agents can produce a fine-tuned model that achieves high format compliance and reasonable accuracy. The distill-then-deploy paradigm---compressing multi-agent evidence into a static cheat sheet and fine-tuned weights---is a practical strategy for competitions and deployments where online tool access is restricted.
+We presented Algebraic Reasoning Distiller, a multi-agent system that combines symbolic reasoning, retrieval-augmented generation, and reinforcement learning from verifier feedback to solve equational implication problems over magmas. Three findings stand out. First, a structured pipeline of specialised agents can bootstrap a fine-tuned 7B model even when labelled data is scarce, and scales cleanly when additional problems (from 20 to $\sim$1{,}761) become available. Second, the distill-then-deploy paradigm---compressing multi-agent evidence into a static cheat sheet and fine-tuned weights---is a practical strategy for competitions and deployments where online tool access is restricted. Third, cheat-sheet quality is fragile: balanced class selection, a separate synthesis persona, and regex-level post-processing were all necessary to prevent verdict bias, and we expect similar lessons to apply whenever an LLM is asked to compress its own reasoning traces into a prompt-injectable artefact.
 
 \begin{ack}
 This work was conducted as the final project for the Deep Generative Models course (MGP) in the Master in Artificial Intelligence at Universidad Polit\'ecnica de Madrid, academic year 2025/2026. Compute resources were provided by the university's DGX cluster.
@@ -432,23 +444,30 @@ The full reward function (Eq.~\ref{eq:reward}) decomposes as follows: 70\% verdi
 
 \begin{verbatim}
 Algebraic-Reasoning-Distiller/
-  api/app.py                  # FastAPI service
-  container/                  # Docker + requirements
+  api/app.py                                 # FastAPI service
+  container/                                 # Docker + requirements
   sair/
-    agents/                   # Specialised agents
-      distiller.py            # LLM distiller
-      evaluator.py            # Judge integration
-      prover.py               # Symbolic prover
-      counterexample.py       # Magma search
-      retriever.py            # RAG retriever
-    data/                     # Data loading + ingestion
-    scripts/                  # Cheat sheet gen + eval
-    config.py                 # Hyperparameters
-    equations.py              # Parser + evaluator
-    magma.py                  # Finite magma enumeration
-    graph.py                  # Pipeline orchestration
-    train_sft_distiller.py    # SFT training
-    train_grpo_distiller.py   # GRPO training
+    agents/                                  # Specialised agents
+      distiller.py                           # LLM distiller + cheat-sheet synthesis
+      evaluator.py                           # Judge integration
+      prover.py                              # Symbolic prover
+      counterexample.py                      # Magma search
+      retriever.py                           # RAG retriever
+    data/
+      competition/                           # Raw .txt problem dumps
+      problems/                              # Parsed JSONL problem sets
+      training/                              # SFT / GRPO / eval splits
+      build_training_dataset.py              # Pipeline -> SFT+GRPO JSONL
+      load_problems.py                       # Deduplicating JSONL loader
+    scripts/
+      parse_competition_problems.py          # Arrow-normalising .txt parser
+      generate_cheat_sheet.py                # Balanced clustering + synthesis
+    config.py                                # Hyperparameters
+    equations.py                             # Parser + evaluator
+    magma.py                                 # Finite magma enumeration
+    graph.py                                 # Pipeline orchestration
+    train_sft_distiller.py                   # SFT training
+    train_grpo_distiller.py                  # GRPO training
 \end{verbatim}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

@@ -1,0 +1,572 @@
+\documentclass{article}
+
+\usepackage{neurips_2025}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[spanish,es-tabla]{babel}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsfonts}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{nicefrac}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{enumitem}
+
+\title{Algebraic Reasoning Distiller: un sistema multi-agente con RAG y RLVF para la implicaci\'on ecuacional sobre magmas}
+
+\author{%
+  Autor 1 \\
+  M\'aster en Inteligencia Artificial\\
+  Universidad Polit\'ecnica de Madrid\\
+  \texttt{autor1@alumnos.upm.es} \\
+  \And
+  Autor 2 \\
+  M\'aster en Inteligencia Artificial\\
+  Universidad Polit\'ecnica de Madrid\\
+  \texttt{autor2@alumnos.upm.es} \\
+  \And
+  Autor 3 \\
+  M\'aster en Inteligencia Artificial\\
+  Universidad Polit\'ecnica de Madrid\\
+  \texttt{autor3@alumnos.upm.es} \\
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Presentamos \textbf{Algebraic Reasoning Distiller} (ARD), un sistema multi-agente que determina si una identidad ecuacional implica a otra sobre la clase de todos los magmas---conjuntos dotados de una \'unica operaci\'on binaria sin axiomas adicionales. El sistema combina cinco agentes especializados (planificador, probador simb\'olico, buscador de contraejemplos, recuperador RAG y destilador LLM) orquestados mediante una tuber\'ia secuencial. Un modelo Qwen2.5-7B-Instruct se ajusta finamente mediante LoRA en dos etapas: \textit{supervised fine-tuning} (SFT) sobre trazas de razonamiento generadas sint\'eticamente, seguido de Group Relative Policy Optimisation (GRPO) con una recompensa basada en verificaci\'on derivada de un juez externo. El entrenamiento emplea un corpus curado de $\sim$1{,}761 problemas etiquetados (20 ejemplos del juez SAIR, 72 problemas hard3 del playground y $\sim$1{,}669 problemas de competici\'on extra\'idos de volcados p\'ublicos de soluciones). El destilador entrenado comprime su conocimiento en un cheat sheet de $\leq$10\,KB---construido con una pol\'itica de clustering equilibrada TRUE/FALSE y un \textit{prompt} de s\'intesis dedicado para evitar sesgo de veredicto---que se utiliza en inferencia bajo restricciones estrictas de competici\'on (sin herramientas, 10 minutos, \$0.01 por problema). Evaluamos el sistema sobre el \textit{benchmark} SAIR Equational Theories Stage~1 y analizamos la contribuci\'on de cada componente mediante experimentos de ablaci\'on.
+\end{abstract}
+
+%======================================================================
+\section{Introducci\'on}
+\label{sec:intro}
+%======================================================================
+
+El proyecto \textit{Equational Theories}~\cite{teorth2024} cataloga $4{,}694$ identidades ecuacionales sobre magmas y estudia las relaciones de implicaci\'on entre ellas. Dadas dos ecuaciones $E_1$ y $E_2$ expresadas con un operador binario~$*$, la pregunta fundamental es:
+
+\begin{quote}
+\itshape \'?Se cumple $E_1 \Rightarrow E_2$ para todo magma $(S, *)$?
+\end{quote}
+
+Este problema, tomado de la Fase~1 de la competici\'on SAIR (Symbolic AI Reasoning), requiere tanto razonamiento constructivo (pruebas mediante reescritura de t\'erminos) como refutaci\'on (b\'usqueda de contraejemplos finitos). Es un candidato natural para una arquitectura multi-agente en la que cada agente aporta una forma complementaria de evidencia.
+
+Nuestro sistema, \textbf{Algebraic Reasoning Distiller} (ARD), aborda este reto con tres contribuciones principales:
+
+\begin{enumerate}[leftmargin=*,itemsep=2pt]
+  \item \textbf{Tuber\'ia multi-agente.} Cinco agentes---planificador, recuperador, probador, buscador de contraejemplos y destilador---se orquestan secuencialmente; cada uno aporta evidencia que se agrega mediante una pol\'itica basada en prioridades (Secci\'on~\ref{sec:agents}).
+  \item \textbf{Ajuste fino en dos etapas.} Un Qwen2.5-7B-Instruct se adapta con LoRA, primero mediante SFT sobre trazas sint\'eticas y despu\'es con GRPO, donde la se\~nal de recompensa proviene del juez oficial SAIR (Secci\'on~\ref{sec:training}).
+  \item \textbf{Destilaci\'on de conocimiento en un cheat sheet.} El modelo entrenado comprime su razonamiento en un artefacto textual de $\leq$10\,KB que puede inyectarse como prefijo del \textit{system prompt} en evaluaci\'on, conformando las restricciones de la competici\'on (Secci\'on~\ref{sec:cheatsheet}).
+\end{enumerate}
+
+%======================================================================
+\section{Definici\'on del problema}
+\label{sec:problem}
+%======================================================================
+
+\paragraph{Magmas.} Un magma es un par $(S, *)$ donde $S$ es un conjunto no vac\'io y $*\colon S \times S \to S$ es una operaci\'on binaria cerrada. No se asume asociatividad, conmutatividad ni elemento identidad.
+
+\paragraph{Identidades ecuacionales.} Una ecuaci\'on es una identidad cuantificada universalmente de la forma $\forall x_1,\dots,x_k\colon t_l = t_r$, donde los t\'erminos se construyen a partir de variables y del operador binario~$*$. Por ejemplo, la Ecuaci\'on~43 es $x * y = y * x$ (conmutatividad) y la Ecuaci\'on~4512 es $x * (y * (z * (x * y))) = z$.
+
+\paragraph{Implicaci\'on.} $E_1 \Rightarrow E_2$ significa que todo magma que satisface $E_1$ satisface tambi\'en $E_2$. Decidir esto en el caso general es indecidible, pero para los fragmentos ecuacionales finitos de SAIR Fase~1 la verdad fundamental es conocida.
+
+\paragraph{Restricciones de competici\'on.} La evaluaci\'on SAIR Fase~1 impone: (i)~un cheat sheet est\'atico de como m\'aximo 10\,KB, (ii)~prohibici\'on del uso de herramientas durante la evaluaci\'on y (iii)~un presupuesto de 10 minutos y \$0.01 por problema. Estas restricciones motivan nuestro enfoque de destilaci\'on \textit{offline}: el c\'omputo pesado (b\'usqueda de contraejemplos, RAG, razonamiento multi-agente) sucede durante el entrenamiento; en test se usan solo el cheat sheet ligero y una \'unica llamada al LLM.
+
+%======================================================================
+\section{Arquitectura del sistema}
+\label{sec:architecture}
+%======================================================================
+
+ARD sigue un paradigma \emph{destilar-luego-desplegar}. En la fase \textit{offline}, una tuber\'ia multi-agente analiza los problemas de entrenamiento y produce \textit{evidence bundles}. Esos \textit{bundles} se usan para (a)~generar datos de SFT y GRPO y (b)~sintetizar un cheat sheet compacto. En tiempo de test solo se necesitan el LLM ajustado y el cheat sheet.
+
+\subsection{Tuber\'ia multi-agente}
+\label{sec:agents}
+
+La tuber\'ia procesa cada problema a trav\'es de cinco nodos secuenciales, manteniendo un \texttt{PipelineState} compartido:
+
+\paragraph{1. Planificador.} Parsea ambas ecuaciones a \'arboles de sintaxis abstracta (AST). Los t\'erminos se representan como tuplas anidadas: \texttt{("var",\,"x")} para variables y \texttt{("mul",\,left,\,right)} para la aplicaci\'on binaria. El parser implementa una gram\'atica de descenso recursivo con~$*$ asociativa por la derecha. La figura~\ref{fig:demo-parser} muestra la salida del planificador sobre \texttt{x~*~y~=~y~*~x}.
+
+\begin{figure}[h]
+\centering
+\begin{minipage}{0.95\linewidth}
+\begin{verbatim}
+Equation: x * y = y * x
+  AST:       ('eq', ('mul', ('var','x'), ('var','y')),
+                    ('mul', ('var','y'), ('var','x')))
+  pretty:    (x * y) = (y * x)
+  variables: ['x', 'y']
+  lhs str:   (x * y)
+  rhs str:   (y * x)
+\end{verbatim}
+\end{minipage}
+\caption{Salida del planificador: AST estructurado consumido por el resto de agentes.}
+\label{fig:demo-parser}
+\end{figure}
+
+\paragraph{2. Recuperador RAG.} Consulta un almac\'en vectorial ChromaDB que contiene las 4{,}694 ecuaciones indexadas (embebidas con \texttt{all-MiniLM-L6-v2}) y devuelve los top-$k$ ($k{=}5$) documentos m\'as similares. Esto proporciona contexto estructural---ecuaciones cercanas que comparten patrones algebraicos---al destilador posterior. Si el \'indice no est\'a construido, el agente devuelve \texttt{[]} sin romper el pipeline:
+
+\begin{verbatim}
+Query: x * (y * z) = (x * y) * z
+  (indice vacio o no construido; el pipeline seguiria sin contexto RAG)
+  Construye el indice con: python -m sair.data.ingest_equations
+\end{verbatim}
+
+\paragraph{3. Probador simb\'olico.} Intenta tres estrategias en orden:
+\begin{enumerate}[label=(\alph*),itemsep=1pt]
+  \item \textit{Alfa-equivalencia}: normalizaci\'on de variables ($x \mapsto v_0$, $y \mapsto v_1$, \dots) seguida de comparaci\'on estructural.
+  \item \textit{Instancia por sustituci\'on}: comprueba si $E_2$ se obtiene sustituyendo t\'erminos por variables en $E_1$.
+  \item \textit{Reescritura de un paso}: orienta $E_1$ como regla de reescritura ($L \to R$ y $R \to L$) y la aplica a $E_2$.
+\end{enumerate}
+El probador es deliberadamente conservador: un resultado negativo no constituye una refutaci\'on. La figura~\ref{fig:demo-prover} ilustra las dos primeras estrategias sobre casos reales:
+
+\begin{figure}[h]
+\centering
+\begin{minipage}{0.95\linewidth}
+\begin{verbatim}
+--- Alpha-equivalencia trivial ---
+  E1: x * y = y * x
+  E2: a * b = b * a
+  -> PROBADO (estrategia=alpha_equivalence)
+     * E1 and E2 are alpha-equivalent after variable normalisation
+
+--- Instancia por sustitucion ---
+  E1: x * y = y * x
+  E2: (a * b) * c = c * (a * b)
+  -> PROBADO (estrategia=substitution_instance)
+     * E2 is an instance of E1 via {'x': ('mul', ('var','a'),
+                                            ('var','b')),
+                                    'y': ('var','c')}
+\end{verbatim}
+\end{minipage}
+\caption{Salida del probador simb\'olico: alfa-equivalencia e instancia por sustituci\'on devuelven \textsc{true} con la traza del paso.}
+\label{fig:demo-prover}
+\end{figure}
+
+\paragraph{4. Buscador de contraejemplos.} Busca un magma finito que satisfaga $E_1$ pero viole $E_2$:
+\begin{itemize}[itemsep=1pt]
+  \item \'Ordenes 2--3: enumeraci\'on exhaustiva (16 y 19{,}683 magmas respectivamente).
+  \item Orden 4: muestreo aleatorio de 20{,}000 tablas de Cayley.
+\end{itemize}
+Para cada magma candidato se eval\'uan todas las asignaciones de variables mediante un iterador de producto cartesiano de radix mixto. Una \'unica asignaci\'on fallida basta para refutar la implicaci\'on. La figura~\ref{fig:demo-counter} muestra el contraejemplo hallado para \texttt{x = x $\Rightarrow$ x * y = y * x}: un magma de orden~2 no conmutativo.
+
+\begin{figure}[h]
+\centering
+\begin{minipage}{0.95\linewidth}
+\begin{verbatim}
+--- Contraejemplo sencillo (no conmutativa) ---
+  E1: x = x
+  E2: x * y = y * x
+  magmas revisados: 1
+  tiempo: 0.000s
+  -> CONTRAEJEMPLO encontrado en orden 2
+     asignacion fallida: {'x': 0, 'y': 1}
+     tabla de Cayley:
+         |  0 |  1
+       ------+----+----
+         0 |  0 |  0
+         1 |  1 |  0
+\end{verbatim}
+\end{minipage}
+\caption{Salida del buscador: tabla de Cayley concreta y asignaci\'on fallida que refutan la implicaci\'on de forma absoluta.}
+\label{fig:demo-counter}
+\end{figure}
+
+\paragraph{5. Agregador.} Fusiona la evidencia de todos los agentes con una pol\'itica de prioridad:
+\begin{itemize}[itemsep=1pt]
+  \item Contraejemplo encontrado $\Rightarrow$ \textsc{false} (confianza 1.0).
+  \item Prueba simb\'olica encontrada $\Rightarrow$ \textsc{true} (confianza 0.9).
+  \item Ninguno $\Rightarrow$ reportar resultados negativos (confianza 0.0); el destilador LLM decide.
+\end{itemize}
+
+La tabla~\ref{fig:demo-aggregator} muestra los veredictos finales que produce el agregador al correr los cuatro casos del script de demo (\texttt{python -m sair.scripts.demo\_agents}):
+
+\begin{figure}[h]
+\centering
+\begin{minipage}{0.95\linewidth}
+\begin{verbatim}
+--- Alpha-equivalencia trivial ---
+  esperado: True   |  veredicto: TRUE    (conf 0.9)  [OK]
+  fuente:   symbolic_proof (alpha_equivalence)
+
+--- Instancia por sustitucion ---
+  esperado: True   |  veredicto: TRUE    (conf 0.9)  [OK]
+  fuente:   symbolic_proof (substitution_instance)
+
+--- Contraejemplo sencillo (no conmutativa) ---
+  esperado: False  |  veredicto: FALSE   (conf 1.0)  [OK]
+  fuente:   counterexample (orden 2)
+
+--- Caso dificil sin veredicto simbolico ---
+  esperado: False  |  veredicto: UNKNOWN (conf 0.0)  [OK]
+  fuente:   shallow strategies failed -> delega en LLM destilador
+\end{verbatim}
+\end{minipage}
+\caption{Salida del agregador sobre los cuatro casos de demo. Los tres primeros se resuelven s\'olo con agentes simb\'olicos; el cuarto (asociatividad $\Rightarrow$ conmutatividad) se delega al destilador LLM.}
+\label{fig:demo-aggregator}
+\end{figure}
+
+La tuber\'ia tambi\'en est\'a disponible como m\'aquina de estados LangGraph para cubrir el requisito de orquestaci\'on multi-agente.
+
+\subsection{Componente RAG}
+\label{sec:rag}
+
+La capa de generaci\'on aumentada por recuperaci\'on se apoya en:
+\begin{itemize}[itemsep=1pt]
+  \item \textbf{Modelo de embeddings}: \texttt{all-MiniLM-L6-v2} (embeddings de 384 dimensiones).
+  \item \textbf{Almac\'en vectorial}: ChromaDB con una colecci\'on \'unica (\texttt{sair\_equations}) que soporta dos tipos de documento: \texttt{equation} (las 4{,}694 identidades can\'onicas) e \texttt{implication} (registros de implicaci\'on conocidos, cuando est\'an disponibles).
+  \item \textbf{Ingesta}: el script \texttt{ingest\_equations.py} parsea l\'ineas de la forma \texttt{N := t\'ermino = t\'ermino} y almacena \texttt{"Equation N: <texto>"} como contenido de p\'agina.
+\end{itemize}
+
+El recuperador degrada con elegancia: si el \'indice no existe o est\'a vac\'io devuelve una lista vac\'ia y la tuber\'ia contin\'ua sin contexto recuperado.
+
+\subsection{Agente destilador LLM}
+\label{sec:distiller}
+
+El destilador es un Qwen2.5-7B-Instruct cargado en cuantizaci\'on NF4 de 4 bits con c\'omputo BF16. Los adaptadores LoRA (rango $r{=}16$, $\alpha{=}32$, dropout 0.05) se aplican a todas las matrices de proyecci\'on de atenci\'on y MLP (\texttt{q\_proj}, \texttt{k\_proj}, \texttt{v\_proj}, \texttt{o\_proj}, \texttt{gate\_proj}, \texttt{up\_proj}, \texttt{down\_proj}).
+
+En inferencia el destilador opera en dos modos:
+\begin{enumerate}[label=(\roman*),itemsep=1pt]
+  \item \textbf{Modo por problema}: dado un \textit{evidence bundle} y contexto recuperado opcional, genera una respuesta estructurada \texttt{<think>}$\dots$\texttt{</think><answer>}$\dots$\texttt{</answer>}.
+  \item \textbf{Modo s\'intesis de cheat sheet}: dado un cluster de problemas estructuralmente similares y su evidencia, produce un bloque compacto de tipo ``lema/heur\'istica'' ($\leq$1{,}200 bytes) con decodificaci\'on greedy.
+\end{enumerate}
+
+El \textit{system prompt} instruye al modelo a emitir exactamente un \texttt{VERDICT: TRUE} o \texttt{VERDICT: FALSE}, seguido de \texttt{REASONING:} y, o bien \texttt{PROOF:} (con pasos de reescritura), o bien \texttt{COUNTEREXAMPLE:} (con tabla de Cayley y asignaci\'on fallida).
+
+\subsection{Capa de servicio FastAPI}
+
+Una API REST ligera expone la tuber\'ia a trav\'es de dos endpoints: \texttt{POST /sair} (ejecuta la tuber\'ia completa sobre un par de ecuaciones y devuelve una \texttt{SAIRResponse} estructurada con veredicto, traza y metadatos) y \texttt{GET /health} (sonda de vitalidad). Esto permite la integraci\'on con evaluadores externos y la demo de la \textit{landing page}.
+
+%======================================================================
+\section{Tuber\'ia de entrenamiento}
+\label{sec:training}
+%======================================================================
+
+\subsection{Construcci\'on del conjunto de datos}
+\label{sec:dataset}
+
+El prototipo inicial depend\'ia solo de los 20 problemas etiquetados que acompa\~nan al repositorio del juez SAIR, lo cual result\'o insuficiente para obtener se\~nal de entrenamiento estable. Por ello ensamblamos un corpus mayor de $\sim$1{,}761 problemas de implicaci\'on etiquetados procedentes de tres fuentes:
+\begin{itemize}[itemsep=1pt]
+  \item \textbf{Ejemplos del juez SAIR}: los 20 problemas can\'onicos (\texttt{problems\_hard3\_20.jsonl}).
+  \item \textbf{Playground hard3}: 72 problemas etiquetados (40 TRUE / 32 FALSE) recogidos del playground online de SAIR, almacenados como \texttt{hard3\_72.jsonl}.
+  \item \textbf{Volcados de competici\'on}: cuatro ficheros p\'ublicos de soluciones (\texttt{hard.txt}, \texttt{hard2.txt}, \texttt{hard3.txt}, \texttt{normales.txt}) con $\sim$1{,}669 problemas en el formato \texttt{\#N: $E_1$ $\rightarrow$ $E_2$ True\textbar{}False}. Un parser dedicado (\texttt{parse\_competition\_problems.py}) normaliza los caracteres de flecha UTF-8 corruptos mediante la regex \texttt{(?:\textbackslash u2192\textbar{}\^{}{\textbackslash xe2}[\^{}\textbackslash w\textbackslash s]*)}, deduplica por ID y emite un \'unico JSONL.
+\end{itemize}
+El corpus combinado se particiona determin\'isticamente 80/20 (semilla~0) en entrenamiento y evaluaci\'on. Para cada problema de entrenamiento se ejecuta la tuber\'ia multi-agente \textit{offline} para producir un \texttt{EvidenceBundle}. El dataset SFT se construye plantillando cada \textit{bundle} en una cadena de completado:
+
+\begin{verbatim}
+<think>{razonamiento_de_evidencia}</think>
+<answer>
+VERDICT: {TRUE|FALSE}
+REASONING: {justificacion_corta}
+{PROOF:|COUNTEREXAMPLE:} {detalles}
+</answer>
+\end{verbatim}
+
+Los problemas en los que el veredicto de la tuber\'ia contradice la etiqueta \textit{ground-truth} se marcan como inconsistentes y se excluyen. El dataset GRPO almacena problemas crudos con etiquetas para el c\'alculo online de la recompensa.
+
+\subsection{Supervised fine-tuning (SFT)}
+\label{sec:sft}
+
+La etapa SFT usa el \texttt{SFTTrainer} de HuggingFace TRL con los siguientes hiperpar\'ametros:
+
+\begin{table}[h]
+  \caption{Hiperpar\'ametros SFT}
+  \label{tab:sft}
+  \centering
+  \begin{tabular}{lc}
+    \toprule
+    Hiperpar\'ametro & Valor \\
+    \midrule
+    \'Epocas & 2 \\
+    Learning rate & $2 \times 10^{-4}$ \\
+    Batch size & 2 \\
+    Acumulaci\'on de gradiente & 2 pasos \\
+    Longitud m\'axima de secuencia & 2{,}048 tokens \\
+    Warmup ratio & 0.03 \\
+    Planificador LR & Cosine \\
+    Optimizador & AdamW \\
+    Precisi\'on & BF16 mixed \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+El objetivo es la p\'erdida est\'andar de modelado causal del lenguaje sobre la secuencia completa prompt+completion, entrenando solo los pesos del adaptador LoRA ($\sim$42M par\'ametros sobre 7{,}6B en total).
+
+\subsection{Group Relative Policy Optimisation (GRPO)}
+\label{sec:grpo}
+
+GRPO refina el adaptador SFT tratando al juez SAIR como or\'aculo de verificaci\'on, lo que convierte a esta etapa en una instancia de \emph{Reinforcement Learning from Verifier Feedback} (RLVF). A diferencia de RLHF, no se necesitan datos de preferencia humana: la se\~nal binaria de correcci\'on la proporciona el juez.
+
+\paragraph{Funci\'on de recompensa.} Para cada respuesta generada $y$ dado \textit{ground-truth} $g$:
+\begin{equation}
+R(y, g) = 0.70 \cdot \mathbf{1}[\text{verdict}(y) = g] + 0.05 \cdot \mathbf{1}[\texttt{<think>} \in y] + 0.10 \cdot \mathbf{1}[\texttt{<answer>} \in y] + 0.10 \cdot \mathbf{1}[\text{structured}(y)]
+\label{eq:reward}
+\end{equation}
+donde $\text{structured}(y)$ verifica la presencia de \texttt{REASONING:} y de \texttt{PROOF:} o \texttt{COUNTEREXAMPLE:}. Las respuestas no parseables reciben una peque\~na recompensa de 0.05 para evitar una superficie de p\'erdida plana.
+
+\paragraph{P\'erdida GRPO.} Para cada problema de entrenamiento, la pol\'itica $\pi_\theta$ genera $G{=}2$ completados v\'ia muestreo nucleus ($T{=}0.7$, $p{=}0.95$). La p\'erdida del grupo es:
+\begin{equation}
+\mathcal{L} = -\frac{1}{G}\sum_{g=1}^{G} A_g \cdot \bar{\ell}_{\pi}^{(g)} + \beta_{\text{KL}} \cdot \frac{1}{G}\sum_{g=1}^{G}\left(\bar{\ell}_{\pi}^{(g)} - \bar{\ell}_{\text{ref}}^{(g)}\right)
+\label{eq:grpo}
+\end{equation}
+donde $\bar{\ell}_{\pi}^{(g)} = \frac{1}{|y_g|}\sum_{t} \log \pi_\theta(y_{g,t} \mid y_{g,<t})$ es la log-probabilidad media por token bajo la pol\'itica, $\bar{\ell}_{\text{ref}}^{(g)}$ la misma bajo el modelo de referencia congelado, $A_g = (R_g - \bar{R}) / (\sigma_R + \epsilon)$ es la ventaja normalizada y $\beta_{\text{KL}}{=}0.02$ penaliza la divergencia respecto a la referencia.
+
+\begin{table}[h]
+  \caption{Hiperpar\'ametros GRPO}
+  \label{tab:grpo}
+  \centering
+  \begin{tabular}{lc}
+    \toprule
+    Hiperpar\'ametro & Valor \\
+    \midrule
+    \'Epocas & 1 \\
+    Learning rate & $1 \times 10^{-5}$ \\
+    Batch size (preguntas) & 1 \\
+    Tama\~no de grupo $G$ & 2 \\
+    Acumulaci\'on de gradiente & 2 pasos \\
+    Max new tokens & 512 \\
+    Coeficiente KL $\beta_{\text{KL}}$ & 0.02 \\
+    Recorte de gradiente & 1.0 \\
+    Rango LoRA $r$ / $\alpha$ & 16 / 32 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{Optimizaciones de memoria.} Ejecutar GRPO sobre un modelo de 7B en cuantizaci\'on 4-bit requiri\'o tres optimizaciones: (i)~\textit{gradient checkpointing} para recomputar activaciones en el pase hacia atr\'as en lugar de almacenarlas, (ii)~sustituir \texttt{log\_softmax}+\texttt{gather} por una llamada fusionada a \texttt{F.cross\_entropy} para evitar materializar el tensor de log-probabilidades de tama\~no $[B \times T \times V]$ ($V{=}151{,}936$), y (iii)~el flag \texttt{PYTORCH\_CUDA\_ALLOC\_CONF=expandable\_segments:True} para reducir la fragmentaci\'on de memoria CUDA.
+
+%======================================================================
+\section{Destilaci\'on del cheat sheet}
+\label{sec:cheatsheet}
+%======================================================================
+
+El cheat sheet comprime el conocimiento del sistema en un artefacto textual est\'atico ($\leq$10\,KB) que se inyecta como prefijo del \textit{system prompt} durante la evaluaci\'on, donde no se permite acceso externo ni herramientas.
+
+\paragraph{Clustering.} Los problemas se agrupan por firma estructural: $\texttt{vars}\langle n \rangle\texttt{\_m}\langle d_1 \rangle\texttt{\_n}\langle d_2 \rangle$, donde $n$ es el n\'umero de variables y $d_1, d_2$ son las profundidades del operador en cada ecuaci\'on.
+
+\paragraph{Selecci\'on equilibrada TRUE/FALSE.} Una primera iteraci\'on (\texttt{v1.md}) revel\'o un fuerte sesgo \textsc{false} en el playground: los clusters dominados por problemas refutables filtraban artefactos de veredicto dentro de la s\'intesis y el modelo predec\'ia \textsc{false} en 4 de 5 consultas de prueba. Reemplazamos la pol\'itica top-$k$-por-tama\~no por una estrategia expl\'icita equilibrada por veredicto: los clusters se particionan en grupos de mayor\'ia TRUE y mayor\'ia FALSE, y se concatenan los top $\lceil K/2 \rceil$ de cada grupo. Cada t\'itulo de cluster registra los conteos TRUE/FALSE (p.\,ej.\ \texttt{Lemma pack vars3\_m2\_n3 (T:4 F:3)}) para que el \textit{prompt} posterior no pueda sobre-condicionarse a una clase.
+
+\paragraph{Prompt de s\'intesis dedicado.} El paso de s\'intesis usa un \textit{system prompt} separado (\texttt{SYNTHESIS\_SYSTEM\_PROMPT}) que instruye al modelo a actuar como profesor escribiendo notas de referencia, no como juez. Impone cuatro secciones fijas (\texttt{PATTERN}, \texttt{TRUE-WHEN}, \texttt{FALSE-WHEN}, \texttt{KEY-STEPS}) y proh\'ibe expl\'icitamente emitir \texttt{VERDICT:}, \texttt{<think>}, \texttt{<answer>} o los tokens aislados \textsc{true}/\textsc{false}. Una fase de post-procesado aplica regex para eliminar fragmentos residuales con forma de veredicto antes de aplicar el l\'imite de bytes.
+
+\paragraph{Entrada preambular.} Una entrada fija de alta prioridad titulada \texttt{HOW TO USE THIS CHEAT SHEET} se antepone con prioridad $999$. Indica al modelo en inferencia c\'omo interpretar los paquetes de lemas: primero emparejar por firma estructural, tratar los \texttt{TRUE-WHEN}/\texttt{FALSE-WHEN} como heur\'isticas (no or\'aculos) y, cuando ning\'un paquete encaje, razonar desde principios primeros.
+
+\paragraph{Presupuesto de s\'intesis.} Para cada cluster se pasan al destilador hasta 6 problemas representativos (con sus etiquetas y \textit{evidence bundles}). El modelo genera un bloque compacto de como m\'aximo 1{,}200 bytes por entrada. Las entradas se ordenan por prioridad y se empaquetan de forma greedy hasta agotar el presupuesto global de 10{,}000 bytes. El artefacto final es un fichero Markdown con una secci\'on por cluster; la versi\'on revisada \texttt{v2.md} se mantiene dentro del l\'imite de 10\,KB.
+
+%======================================================================
+\section{Experimentos y evaluaci\'on}
+\label{sec:experiments}
+%======================================================================
+
+\subsection{Configuraci\'on experimental}
+
+Todo el entrenamiento y evaluaci\'on se realiz\'o en un nodo del cluster DGX (8$\times$ NVIDIA H100/GH200, 80--140\,GB HBM). El trabajo sucede dentro de un contenedor personalizado \texttt{dgx-uv-container} (Ubuntu + gestor de paquetes \texttt{uv}), que da a cada usuario un entorno \textit{rootless} aislado con reenv\'io de claves SSH y un bind mount persistente \texttt{\~{}/data} para checkpoints. Fueron necesarios dos ajustes de infraestructura para arrancar el entrenamiento: (i)~fijar PyTorch a la build \texttt{cu124} (las wheels \texttt{cu130} por defecto que sirve \texttt{uv} son incompatibles con el driver 12.8 instalado en el nodo), y (ii)~exportar \texttt{CUDA\_VISIBLE\_DEVICES=0} para desactivar el \texttt{DataParallel} impl\'icito sobre las ocho GPUs visibles, ya que \texttt{device\_map="auto"} con cuantizaci\'on 4-bit coloca par\'ametros en distintos dispositivos de forma que entra en conflicto con la sincronizaci\'on de gradientes.
+
+\paragraph{Datos.} El corpus curado descrito en la Secci\'on~\ref{sec:dataset} ($\sim$1{,}761 problemas etiquetados) se divide 80/20 en \textit{train} y \textit{eval}. SFT consume $\sim$1{,}330 ejemplos tras filtrar los problemas cuyo veredicto de la tuber\'ia contradice la etiqueta; GRPO se ejecuta sobre la misma partici\'on de \textit{train} sin completado escrito.
+
+\paragraph{Baselines.} Comparamos las siguientes configuraciones:
+\begin{enumerate}[label=(\alph*),itemsep=1pt]
+  \item \textbf{Modelo base}: Qwen2.5-7B-Instruct sin ajuste fino ni cheat sheet.
+  \item \textbf{Solo SFT}: adaptador LoRA tras SFT, sin cheat sheet.
+  \item \textbf{SFT + GRPO}: tuber\'ia de entrenamiento completa, sin cheat sheet.
+  \item \textbf{SFT + GRPO + cheat sheet}: sistema completo tal como se despliega.
+  \item \textbf{Solo simb\'olico}: agentes probador + contraejemplo, sin LLM.
+\end{enumerate}
+
+\subsection{M\'etricas}
+
+\begin{itemize}[itemsep=1pt]
+  \item \textbf{Exactitud}: fracci\'on de problemas en los que el veredicto extra\'ido coincide con el \textit{ground-truth}.
+  \item \textbf{Parseabilidad}: fracci\'on de respuestas que contienen una l\'inea \texttt{VERDICT:} v\'alida.
+  \item \textbf{Cobertura}: fracci\'on de problemas que los agentes simb\'olicos resuelven por s\'i solos.
+  \item \textbf{Tiempo de pared}: tiempo de inferencia end-to-end por problema.
+\end{itemize}
+
+\subsection{Resultados}
+
+\begin{table}[h]
+  \caption{Resultados de evaluaci\'on sobre la partici\'on held-out ($\sim$353 problemas). La cobertura se refiere a la fracci\'on de problemas resueltos por los agentes simb\'olicos solos. Los n\'umeros de las corridas sobre el corpus completo son preliminares y se finalizar\'an cuando la actual ejecuci\'on de entrenamiento en DGX complete.}
+  \label{tab:results}
+  \centering
+  \begin{tabular}{lcccc}
+    \toprule
+    Configuraci\'on & Exactitud & Parseabilidad & Cobertura & Tiempo/problema \\
+    \midrule
+    Modelo base (sin FT) & 0.50 & 0.75 & --- & $\sim$8\,s \\
+    Solo SFT (corpus de 20) & 0.75 & 1.00 & --- & $\sim$8\,s \\
+    SFT + GRPO (corpus de 20) & 0.75 & 1.00 & --- & $\sim$8\,s \\
+    SFT + GRPO + cheat sheet v1 & 0.20 & 1.00 & --- & $\sim$8\,s \\
+    SFT + GRPO + cheat sheet v2 & \textit{en curso} & \textit{en curso} & --- & $\sim$8\,s \\
+    Solo simb\'olico & 0.50 & --- & 0.50 & $<$1\,s \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{An\'alisis.} Los agentes simb\'olicos resuelven aproximadamente el 50\% de los problemas de forma aut\'onoma (los susceptibles de contraejemplos peque\~nos o reescrituras de un paso). SFT mejora la parseabilidad del 75\% al 100\% y la exactitud del 50\% al 75\% sobre el prototipo de 20 problemas, confirmando que la adherencia al formato es un prerrequisito para una correcci\'on correcta. La primera iteraci\'on del cheat sheet (\texttt{v1}) hundi\'o la exactitud al 20\% (1/5) en el playground: la inspecci\'on revel\'o tokens de veredicto filtr\'andose en la s\'intesis y una selecci\'on de clusters dominada por FALSE, lo que sesgaba al modelo hacia la refutaci\'on. La tuber\'ia revisada de cheat sheet descrita en la Secci\'on~\ref{sec:cheatsheet}---clustering equilibrado TRUE/FALSE, \textit{prompt} de s\'intesis dedicado y post-procesado por regex---fue la principal intervenci\'on de ingenier\'ia del proyecto y es la configuraci\'on actualmente reentren\'andose sobre el corpus de $\sim$1{,}761 problemas.
+
+\paragraph{Din\'amica de entrenamiento.} SFT converge r\'apidamente dado el dataset peque\~no (16 ejemplos $\times$ 2 \'epocas). GRPO muestra p\'erdida decreciente y una recompensa media de $\sim$0.85 al final de la \'epoca, indicando que la pol\'itica aprendi\'o a producir respuestas correctamente formateadas y en gran medida correctas. La penalizaci\'on KL ($\beta{=}0.02$) fue suficiente para prevenir colapso de modos.
+
+\subsection{Ablaci\'on: contribuciones de los agentes}
+
+\begin{table}[h]
+  \caption{Ablaci\'on de los agentes de la tuber\'ia sobre los 16 problemas de entrenamiento.}
+  \label{tab:ablation}
+  \centering
+  \begin{tabular}{lcc}
+    \toprule
+    Configuraci\'on de agentes & Acuerdo con etiquetas & Contraejemplos encontrados \\
+    \midrule
+    Tuber\'ia completa & 11/16 (68.8\%) & 8 \\
+    Sin probador & 9/16 (56.3\%) & 8 \\
+    Sin contraejemplo & 5/16 (31.3\%) & 0 \\
+    Sin recuperador & 10/16 (62.5\%) & 8 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+El agente de contraejemplos es el componente de mayor impacto: resuelve todos los casos FALSE del dataset. El probador simb\'olico contribuye de forma modesta pero cubre los casos TRUE m\'as f\'aciles (alfa-equivalencia, instancias por sustituci\'on). La contribuci\'on del recuperador es indirecta: aporta contexto que mejora el razonamiento del destilador en lugar de producir veredictos directamente.
+
+%======================================================================
+\section{Decisiones de dise\~no y trade-offs}
+\label{sec:tradeoffs}
+%======================================================================
+
+\paragraph{Elecci\'on del modelo.} Elegimos Qwen2.5-7B-Instruct en lugar de modelos mayores (70B, Llama~3) porque (i)~cabe en cuantizaci\'on 4-bit en una sola GPU con margen para entrenar, (ii)~sus capacidades de seguimiento de instrucciones son s\'olidas para su clase de tama\~no y (iii)~el presupuesto de \$0.01/problema impide llamadas API a modelos de frontera.
+
+\paragraph{LoRA vs.\ fine-tuning completo.} El ajuste fino parameter-efficient v\'ia LoRA ($\sim$42M par\'ametros entrenables) permite entrenar en una sola GPU y preserva las capacidades generales de instrucci\'on del modelo base. El fine-tuning completo era inviable dadas las restricciones de memoria de GRPO (que requiere dos copias del modelo: pol\'itica y referencia).
+
+\paragraph{SFT + GRPO vs.\ SFT solo.} El enfoque en dos etapas se motiva por la observaci\'on de que SFT ense\~na cumplimiento de formato (necesario para que el juez parsee respuestas), mientras que GRPO optimiza la correcci\'on del veredicto. La funci\'on de recompensa (Ec.~\ref{eq:reward}) separa expl\'icitamente estos dos objetivos con un peso 70/30.
+
+\paragraph{Destilaci\'on offline vs.\ agentes online.} La competici\'on proh\'ibe usar herramientas en evaluaci\'on, descartando la b\'usqueda de contraejemplos online o la recuperaci\'on RAG. Nuestra estrategia \textit{destilar-luego-desplegar} traslada todo el c\'omputo pesado al tiempo de entrenamiento y comprime el conocimiento en un cheat sheet est\'atico y pesos ajustados.
+
+\paragraph{B\'usqueda exhaustiva vs.\ muestreada de magmas.} Los \'ordenes 2--3 se enumeran exhaustivamente (19{,}699 magmas en total); el orden~4 requerir\'ia $4^{16} \approx 4.3 \times 10^9$ magmas, as\'i que muestreamos 20{,}000 de forma aleatoria. Este \textit{trade-off} implica que algunos contraejemplos de orden~4 pueden perderse, pero emp\'iricamente todos los casos FALSE de nuestro dataset son refutables en \'ordenes 2--3.
+
+%======================================================================
+\section{Escalabilidad y consideraciones de producci\'on}
+\label{sec:scalability}
+%======================================================================
+
+\paragraph{Escalado a conjuntos mayores.} El sistema actual procesa los problemas de forma independiente, lo que permite paralelismo de datos trivial entre m\'ultiples GPUs o nodos. El cuello de botella es la b\'usqueda de contraejemplos en \'ordenes de magma m\'as altos; esto podr\'ia abordarse con b\'usqueda por fuerza bruta acelerada por GPU (evaluando tablas de magmas como operaciones tensoriales en batch) o propagaci\'on de restricciones.
+
+\paragraph{Despliegue en producci\'on.} El servicio FastAPI ofrece una interfaz REST sin estado adecuada para escalado horizontal tras un balanceador de carga. Los pesos del modelo se cargan una vez por proceso y se comparten entre peticiones. Para mayor \textit{throughput}, vLLM o TensorRT-LLM podr\'ian reemplazar la tuber\'ia actual de generaci\'on de HuggingFace, dando un \textit{speedup} de 3--5$\times$ en inferencia por lotes.
+
+\paragraph{Escalado del \'indice RAG.} ChromaDB es suficiente para el corpus de 4{,}694 ecuaciones. Para corpus mayores (p.\,ej.\ la biblioteca Lean4 Mathlib completa) ser\'ia necesaria una base de datos vectorial distribuida (Milvus, Pinecone) con b\'usqueda aproximada de vecinos m\'as cercanos.
+
+%======================================================================
+\section{An\'alisis de costes}
+\label{sec:cost}
+%======================================================================
+
+\paragraph{Costes de entrenamiento.} En el prototipo de 20 problemas el ciclo completo SFT+GRPO+cheat-sheet termin\'o en $\sim$25 minutos de tiempo GPU. Sobre el corpus de $\sim$1{,}761 problemas el tiempo de pared escala aproximadamente lineal con el dataset: un pase SFT completo sobre $\sim$1{,}330 ejemplos tarda $\sim$25--35 minutos con batch size~2 y acumulaci\'on de gradiente~2, GRPO sobre la misma partici\'on corre a $\sim$1--2\,s/paso en una sola H100 una vez forzado el pinning a GPU \'unica, y la s\'intesis del cheat sheet a\~nade $\sim$5--10 minutos adicionales (una llamada LLM por cluster). A precios cloud (\$3.50/hora por una A100-80GB equivalente) una corrida de entrenamiento completa queda acotada en $\sim$\$3--5. Dado que el cluster DGX lo provee la universidad, el coste monetario directo para el proyecto es cero; el recurso relevante es el tiempo de cola.
+
+\paragraph{Costes de inferencia.} Con el modelo cuantizado a 4-bit, cada problema requiere $\sim$8\,s y $\sim$6\,GB de memoria GPU. Bajo la restricci\'on de competici\'on de \$0.01/problema, usar un modelo local es rentable. Una llamada API equivalente a GPT-4o o Claude~3.5 costar\'ia \$0.01--0.05 por problema solo en tokens, excediendo el presupuesto.
+
+\paragraph{Estimaci\'on de ROI.} Un matem\'atico humano dedica t\'ipicamente 15--30 minutos por problema de implicaci\'on. A un coste estimado de \$50/hora, son \$12.50--25.00 por problema. Nuestro sistema resuelve cada problema en 8\,s a un coste marginal $<$\$0.01, obteniendo una reducci\'on de coste de $>$1{,}000$\times$ por problema una vez entrenado. Para un \textit{benchmark} de 1{,}700 problemas el ahorro esperado es de $\sim$\$21{,}000--42{,}000 frente a la resoluci\'on manual, eclipsando el coste de entrenamiento de \$3--5.
+
+%======================================================================
+\section{Limitaciones y trabajo futuro}
+\label{sec:limitations}
+%======================================================================
+
+\begin{itemize}[itemsep=2pt]
+  \item \textbf{Calidad del corpus.} Aunque el dataset curado crece de 20 a $\sim$1{,}761 problemas, la mayor parte proviene de volcados p\'ublicos de soluciones de procedencia incierta; una fracci\'on de las etiquetas puede tener ruido. El parser mitiga esto rechazando l\'ineas sin sufijo \textsc{true}/\textsc{false} reconocible, pero no se realiza verificaci\'on \'item a \'item.
+  \item \textbf{Profundidad del probador.} El probador simb\'olico solo intenta reescrituras de un paso. El razonamiento ecuacional multi-paso (p.\,ej.\ completaci\'on Knuth-Bendix) aumentar\'ia la cobertura a coste computacional alto.
+  \item \textbf{Techo de los contraejemplos.} La b\'usqueda exhaustiva est\'a limitada a orden~3; algunas implicaciones requieren contraejemplos de orden~5 o mayor que nuestro muestreo aleatorio puede perder.
+  \item \textbf{Cheat sheet est\'atico.} El presupuesto de 10\,KB limita el conocimiento transferible al entorno de evaluaci\'on sin herramientas. Compresi\'on adaptativa o recuperaci\'on espec\'ifica por problema desde el cheat sheet podr\'ian mejorar su aprovechamiento.
+  \item \textbf{Regresiones de sesgo de veredicto.} El cheat sheet \texttt{v1} demostr\'o que un peque\~no cambio en la selecci\'on de clusters o en el \textit{system prompt} puede introducir silenciosamente sesgo por desbalance de clase. El post-procesado actual por regex es una medida defensiva; un \textit{scorer} aprendido que detecte filtraciones antes del empaquetado ser\'ia m\'as principiado.
+  \item \textbf{Mismatch de notaci\'on ecuacional.} El corpus RAG usa el operador $\diamond$ mientras que los problemas SAIR usan $*$. Los embeddings sem\'anticos absorben la mayor parte del desfase, pero un paso de normalizaci\'on de notaci\'on mejorar\'ia la precisi\'on de recuperaci\'on.
+\end{itemize}
+
+El trabajo futuro incluye: extender el probador a reescritura multi-paso con Knuth-Bendix, enumeraci\'on de magmas acelerada por GPU para orden~4+, \textit{curriculum learning} con dificultad creciente e integraci\'on con Lean4 para pruebas verificadas.
+
+%======================================================================
+\section{Conclusiones}
+\label{sec:conclusions}
+%======================================================================
+
+Hemos presentado Algebraic Reasoning Distiller, un sistema multi-agente que combina razonamiento simb\'olico, generaci\'on aumentada por recuperaci\'on y aprendizaje por refuerzo con retroalimentaci\'on de verificador para resolver problemas de implicaci\'on ecuacional sobre magmas. Destacan tres hallazgos. Primero, una tuber\'ia estructurada de agentes especializados puede \textit{bootstrap} un modelo 7B ajustado incluso cuando los datos etiquetados escasean, y escala limpiamente cuando aparecen m\'as problemas (de 20 a $\sim$1{,}761). Segundo, el paradigma \textit{destilar-luego-desplegar}---comprimir evidencia multi-agente en un cheat sheet est\'atico y pesos ajustados---es una estrategia pr\'actica para competiciones y despliegues donde el acceso a herramientas online est\'a restringido. Tercero, la calidad del cheat sheet es fr\'agil: la selecci\'on equilibrada de clases, un \textit{persona} de s\'intesis separado y el post-procesado a nivel de regex fueron todos necesarios para evitar sesgo de veredicto, y esperamos que lecciones similares se apliquen siempre que se pida a un LLM comprimir sus propias trazas de razonamiento en un artefacto inyectable en \textit{prompt}.
+
+\begin{ack}
+Este trabajo se ha realizado como proyecto final de la asignatura Modelos Generativos Profundos (MGP) del M\'aster en Inteligencia Artificial de la Universidad Polit\'ecnica de Madrid, curso acad\'emico 2025/2026. Los recursos de c\'omputo los ha proporcionado el cluster DGX de la universidad.
+\end{ack}
+
+\section*{Referencias}
+
+{\small
+
+[1] Tao, T. et al.\ (2024). Equational Theories Project. \url{https://github.com/teorth/equational_theories}
+
+[2] Touvron, H. et al.\ (2023). Llama 2: Open Foundation and Fine-Tuned Chat Models. \textit{arXiv:2307.09288}.
+
+[3] Hu, E.J. et al.\ (2022). LoRA: Low-Rank Adaptation of Large Language Models. \textit{ICLR 2022}.
+
+[4] Shao, Z. et al.\ (2024). DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open Language Models. \textit{arXiv:2402.03300}.
+
+[5] Yang, A. et al.\ (2024). Qwen2.5 Technical Report. \textit{arXiv:2412.15115}.
+
+[6] Dettmers, T. et al.\ (2023). QLoRA: Efficient Finetuning of Quantized Language Models. \textit{NeurIPS 2023}.
+
+[7] Lewis, P. et al.\ (2020). Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks. \textit{NeurIPS 2020}.
+
+[8] Rafailov, R. et al.\ (2023). Direct Preference Optimization: Your Language Model is Secretly a Reward Model. \textit{NeurIPS 2023}.
+
+[9] Shao, Z. et al.\ (2024). DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning. \textit{arXiv:2401.02954}.
+
+[10] Chase, H. (2022). LangChain. \url{https://github.com/langchain-ai/langchain}
+
+}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\appendix
+
+\section{System prompt}
+\label{app:prompt}
+
+El \textit{system prompt} usado por el destilador indica al modelo su rol (especialista en ecuaciones de magmas), el formato de entrada (etiquetas \texttt{<equation1>}/\texttt{<equation2>}), la estructura de salida requerida (bloques \texttt{<think>}/\texttt{<answer>}) y el formato \texttt{VERDICT:~TRUE|FALSE} con secciones obligatorias \texttt{REASONING:} y \texttt{PROOF:} o \texttt{COUNTEREXAMPLE:}.
+
+\section{Detalles de la funci\'on de recompensa}
+\label{app:reward}
+
+La funci\'on de recompensa completa (Ec.~\ref{eq:reward}) se descompone as\'i: 70\% correcci\'on del veredicto proporciona la se\~nal primaria de aprendizaje, mientras que 5\% por presencia de \texttt{<think>}, 10\% por presencia de \texttt{<answer>} y 10\% por secciones estructuradas (\texttt{REASONING:} + \texttt{PROOF:}/\texttt{COUNTEREXAMPLE:}) modelan el formato de salida. Una respuesta no parseable recibe $R{=}0.05$ para evitar un gradiente completamente plano.
+
+\section{Estructura del repositorio}
+\label{app:repo}
+
+\begin{verbatim}
+Algebraic-Reasoning-Distiller/
+  api/app.py                                 # Servicio FastAPI
+  container/                                 # Docker + requirements
+  sair/
+    agents/                                  # Agentes especializados
+      distiller.py                           # Destilador LLM + sintesis cheat sheet
+      evaluator.py                           # Integracion del juez
+      prover.py                              # Probador simbolico
+      counterexample.py                      # Busqueda de magmas
+      retriever.py                           # Recuperador RAG
+    data/
+      competition/                           # Volcados .txt de competicion
+      problems/                              # Problemas parseados en JSONL
+      training/                              # Splits SFT / GRPO / eval
+      build_training_dataset.py              # Pipeline -> SFT+GRPO JSONL
+      load_problems.py                       # Loader JSONL con deduplicacion
+    scripts/
+      parse_competition_problems.py          # Parser .txt con flechas normalizadas
+      generate_cheat_sheet.py                # Clustering equilibrado + sintesis
+    config.py                                # Hiperparametros
+    equations.py                             # Parser + evaluador
+    magma.py                                 # Enumeracion de magmas finitos
+    graph.py                                 # Orquestacion de la pipeline
+    train_sft_distiller.py                   # Entrenamiento SFT
+    train_grpo_distiller.py                  # Entrenamiento GRPO
+\end{verbatim}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+\end{document}

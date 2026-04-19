@@ -115,13 +115,86 @@ These constraints motivate our approach of \textit{offline} distillation: the co
 
 \section{Method}
 
+Our solution, ARD (Algebraic Reasoning Distiller), follows the paradigm \textit{distill, then deploy}. In its \textit{offline} setting, the multi-agent system analyzes the training dataset of problems and`produces \textit{evidence bundles}. These are then used to both generate the final cheatsheet and to fine-tune a pretrained LLM, which is then deployed in the \textit{online} setting to solve the test problems based on the generated cheatsheet.
+
 \subsection{System Architecture}
+
+The multi-agent system consists of 5 sequential nodes, each responsible for a specific aspect of the problem-solving process. Below, we include a graphic to illustrate the architecture of the system, followed by a detailed description of each agent's role and functionality:
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{figures/architecture.png}
+    \caption{Architecture of the multi-agent system.}
+    \label{fig:architecture}
+\end{figure}
+
+
+\subsubsection{Planner}
+
+This agent takes the input problem (\( (E_1, E_2) \)) and generates parses them into \textbf{AST} (Abstract Syntax Tree) format. Terms are represented as nested tuples: \texttt{("var", "x")} for variables and \texttt{("op", left, right)} for operations. It implements a simple recursive descent parser to achieve this.
+
+
+\subsubsection{RAG Retriever}
+% Pregunta: Son 4694 o 1761 como pone en la sección 6.1 del tex proporcionado por Claude?
+Recovers relevant information from a knowledge base of equational theories. In specific, it uses a vector database (ChromaDB) which contains the 4,694 equations from the training set, embedded using a pretrained model (\texttt{all-MiniLM-L6-v2}). The agent retrieves the \textit{top-k} (in our case, $k=5$) most relevant equations based on cosine similarity.
+
+\subsubsection{Symbolic Prover}
+
+This agent attempts to prove the implication \( E_1 \implies E_2 \) using symbolic manipulation. It applies a predefined list of strategies:
+\begin{enumerate}
+    \item \textbf{Alpha-equivalence}: Check if \( E_1 \) and \( E_2 \) are the same up to variable renaming.
+    \item \textbf{Substitution}: Attempt to substitute terms in \( E_1 \) to derive \( E_2 \).
+    \item \textbf{Rewriting}: Use the retrieved equations to rewrite \( E_1 \) and see if it can be transformed into \( E_2 \).
+\end{enumerate}
+This component is deliberately designed to be overly conservative: a negative result does not necessarily mean that the implication is false, but a positive result is a strong signal of the implication being true.
+
+\subsubsection{Counterexample Generator}
+
+Tries to find a counterexample that satisfies \( E_1 \) but not \( E_2 \). It searches increasingly complex magmas (starting from a single-element set and increasing the number of elements) and checks if there exists an interpretation that satisfies \( E_1 \) but not \( E_2 \), applying a different heuristic depending on the order:
+\begin{itemize}
+    \item \textbf{Orders 2 and 3}: Exhaustive search over all possible interpretations. There are only 16 possible magmas of order 2 and 19,683 of order 3, which makes this approach feasible.
+    \item \textbf{Order 4:} Random sampling of 20,000 Cayley tables \footnote{A Cayley table is a mathematical table that describes the operation of a magma. It lists the results of applying the binary operation to every possible pair of elements in the set.} (out of the over 4 billion possible magmas of order 4) and checking if any of them satisfies \( E_1 \) but not \( E_2 \).
+\end{itemize}
+For every candidate, all possible variable assignments are checked by means of a cartesian product iteration with mixed-radix counting (to account for the different number of elements in each order). A single counterexample is sufficient to conclude that the implication is false, but if no counterexample is found, no conclusion can be drawn.
+
+\subsubsection{Aggregator}
+
+The aggregator takes the outputs of the previous agents and generates a priority policy:
+\begin{itemize}
+    \item If the Symbolic Prover finds a proof, the implication is classified as \textbf{True} with confidence 0.9.
+    \item If the Counterexample Generator finds a counterexample, the implication is classified as \textbf{False} with confidence 1.0.
+    \item If neither of the above agents finds a conclusive result, the implication is classified as None with confidence 0.0.
+\end{itemize}
+
+An illustrative example of this pipeline can be found in Appendix \ref{appendix:pipeline_example}.
 
 \subsection{Architectural Details}
 
+In addition to the specific algorithms and heuristics implemented in each agent, there are two key architectural details that are worth mentioning:
+
+\begin{itemize}
+    \item \textbf{Distilled LLM Agent}: This agent is responsible for generating the final cheatsheet based on the evidence bundles produced by the multi-agent system. It uses a pretrained LLM, in our case Qwen2.5-7B-Instruct \cite{qwen25_7b}, quantized to 4 bits and using BF16 precision for the attention mechanism. The model is fine-tuned on the training dataset using LoRA \cite{hu2021lora} with a rank of 16, $\alpha$ of 32 and a dropout of 0.05. During inference, the model operates under two different modes:
+          \begin{itemize}
+              \item \textbf{Problem-specific:} Given an evidence bundle and the (optional) retrieved context, the model generates an structured answer that includes the tokens \texttt{<think>}, \texttt{</think>}, \texttt{<answer>} and \texttt{</answer>}.
+              \item \textbf{General-purpose:} Given a set of evidence bundles, the model generates a compact \textit{lemma/heuristic} block using greedy decoding. This block is designed to be as informative as possible while being no greater than 1200 bytes in size (in order to fit the 10 KB limit for the final cheatsheet after including the retrieved context).
+          \end{itemize}
+    \item \textbf{FastAPI Server}: A lightweight API REST exposes the functionality of the multi-agent system, allowing the access through two endpoints: POST \texttt{/sair} (which runs the complete system under a given problem, returning a \texttt{SAIRResponse} object) and GET \texttt{/health} (checking that the server is running properly).
+\end{itemize}
+
 \section{Experiments and Results}
+% Duda de numero de problemas
+All the training and evaluation processes were conducted on a node of the DGX cluster (8 $\times$ NVIDIA H100 GPUs). The training dataset consists of 4,694 problems, divided into a training set consisting of an 80\% of the problems (3,755) and a validation set consisting of the remaining 20\% (939).
 
 \subsection{Evaluation Metrics}
+
+The performance of our system was evaluated using the following metrics:
+\begin{itemize}
+    \item \textbf{Accuracy}: Fraction of problems in which the VERDICT (True/False) is that of the ground truth.
+    \item \textbf{Parsing Accuracy}: Fraction of outputs which contain a line with the correct format \texttt{VERDICT: <True/False>} (regardless of whether the verdict is correct or not).
+    \item \textbf{Coverage}: Fraction of problems for which the system produces a non-empty verdict (regardless of whether it is correct or not).
+    \item \textbf{Average Inference Time}: Average time taken to produce a verdict for a given problem.
+\end{itemize}
+
 
 \section{Discussion}
 
@@ -133,5 +206,10 @@ These constraints motivate our approach of \textit{offline} distillation: the co
 
 \bibliographystyle{unsrtnat}
 \bibliography{references}
+
+\appendix
+
+\section{Pipeline Example}
+\label{appendix:pipeline_example}
 
 \end{document}

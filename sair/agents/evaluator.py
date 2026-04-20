@@ -20,16 +20,18 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from time import perf_counter
-from typing import Any, Callable
+from typing import Any
 
 import torch
+from tqdm.auto import tqdm
 from transformers import PreTrainedModel, PreTrainedTokenizerBase
 
+from sair.agents.distiller import _generate_with_progress
 from sair.config import SAIR_INFERENCE_CONFIG, SAIR_JUDGE_REPO
 from sair.schemas import Problem, RunMetrics
-
 
 # ---------------------------------------------------------------------------
 # Judge binding — import judge.judge_response from the cloned SAIR repo
@@ -99,6 +101,7 @@ def _answer_problem_local(
     cfg: SAIR_INFERENCE_CONFIG,
     cheat_sheet_text: str,
     problem: Problem,
+    show_progress: bool = False,
 ) -> str:
     """Run the local distiller on one problem, with the cheat sheet injected."""
     system_prompt: str = str(cfg.system_prompt)
@@ -134,7 +137,11 @@ def _answer_problem_local(
     if "attention_mask" in model_inputs:
         gen_kwargs["attention_mask"] = model_inputs["attention_mask"]
 
-    outputs: torch.Tensor = model.generate(**gen_kwargs)
+    outputs: torch.Tensor = _generate_with_progress(
+        model=model,
+        gen_kwargs=gen_kwargs,
+        progress_label=f"eval inference: {problem.id}" if show_progress else None,
+    )
     prompt_len: int = int(input_ids.shape[-1])
     return tokenizer.decode(
         outputs[0, prompt_len:], skip_special_tokens=True
@@ -163,7 +170,13 @@ def evaluate_with_local_model(
     per_problem: list[dict[str, Any]] = []
 
     start: float = perf_counter()
-    for problem in problems:
+    labeled_problems = [problem for problem in problems if problem.answer is not None]
+    for problem in tqdm(
+        labeled_problems,
+        desc="[eval] inference",
+        unit="problem",
+        dynamic_ncols=True,
+    ):
         if problem.answer is None:
             continue
         total += 1

@@ -23,6 +23,7 @@ from typing import Any
 
 import torch
 from peft import PeftModel
+from tqdm.auto import tqdm
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -30,10 +31,10 @@ from transformers import (
     PreTrainedModel,
     PreTrainedTokenizerBase,
 )
+from transformers.generation.streamers import BaseStreamer
 
 from sair.config import SAIR_INFERENCE_CONFIG
 from sair.schemas import EvidenceBundle, Problem
-
 
 # ---------------------------------------------------------------------------
 # Dedicated system prompt for cheat-sheet synthesis mode.
@@ -118,6 +119,66 @@ def _resolve_checkpoint(cfg: SAIR_INFERENCE_CONFIG) -> Path | None:
     return None
 
 
+class _TqdmTokenStreamer(BaseStreamer):
+    """Update a tqdm bar as HuggingFace emits generated token ids."""
+
+    def __init__(self, *, total: int, description: str) -> None:
+        self._total = int(total)
+        self._seen_prompt = False
+        self._generated = 0
+        self._pbar = tqdm(
+            total=self._total,
+            desc=description,
+            unit="tok",
+            dynamic_ncols=True,
+            leave=True,
+        )
+
+    def put(self, value: Any) -> None:
+        if value is None:
+            return
+
+        tensor = value.detach().cpu() if isinstance(value, torch.Tensor) else value
+        if isinstance(tensor, torch.Tensor) and tensor.ndim > 1:
+            tensor = tensor[0]
+        n_tokens = int(tensor.numel()) if isinstance(tensor, torch.Tensor) else 1
+
+        # GenerationMixin sends the full prompt before the first generated token.
+        if not self._seen_prompt:
+            self._seen_prompt = True
+            return
+
+        step = min(n_tokens, max(self._total - self._generated, 0))
+        if step <= 0:
+            return
+        self._generated += step
+        self._pbar.update(step)
+
+    def end(self) -> None:
+        self._pbar.close()
+
+
+def _generate_with_progress(
+    *,
+    model: PreTrainedModel,
+    gen_kwargs: dict[str, Any],
+    progress_label: str | None,
+) -> torch.Tensor:
+    """Run ``model.generate`` and optionally expose token-level progress."""
+    if not progress_label:
+        return model.generate(**gen_kwargs)
+
+    streamer = _TqdmTokenStreamer(
+        total=int(gen_kwargs["max_new_tokens"]),
+        description=progress_label,
+    )
+    gen_kwargs = {**gen_kwargs, "streamer": streamer}
+    try:
+        return model.generate(**gen_kwargs)
+    finally:
+        streamer.end()
+
+
 def load_distiller_model(
     *,
     cfg: SAIR_INFERENCE_CONFIG | None = None,
@@ -188,6 +249,7 @@ def run_distiller(
     tokenizer: PreTrainedTokenizerBase,
     cfg: SAIR_INFERENCE_CONFIG | None = None,
     retrieved_context: list[str] | None = None,
+    show_progress: bool = True,
 ) -> str:
     """Generate a ``<think>/<answer>`` completion for a single problem.
 
@@ -233,7 +295,11 @@ def run_distiller(
     if "attention_mask" in model_inputs:
         gen_kwargs["attention_mask"] = model_inputs["attention_mask"]
 
-    outputs: torch.Tensor = model.generate(**gen_kwargs)
+    outputs: torch.Tensor = _generate_with_progress(
+        model=model,
+        gen_kwargs=gen_kwargs,
+        progress_label="distiller inference" if show_progress else None,
+    )
     prompt_len: int = int(input_ids.shape[-1])
     new_tokens: torch.Tensor = outputs[0, prompt_len:]
     return tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
@@ -252,6 +318,7 @@ def synthesize_cheat_sheet_entry(
     max_new_tokens: int | None = None,
     max_examples: int = 3,
     max_evidence_chars: int = 900,
+    show_progress: bool = True,
 ) -> str:
     """Ask the distiller to summarize one cluster into a short lemma block.
 
@@ -317,7 +384,11 @@ def synthesize_cheat_sheet_entry(
     if "attention_mask" in model_inputs:
         gen_kwargs["attention_mask"] = model_inputs["attention_mask"]
 
-    outputs: torch.Tensor = model.generate(**gen_kwargs)
+    outputs: torch.Tensor = _generate_with_progress(
+        model=model,
+        gen_kwargs=gen_kwargs,
+        progress_label=f"cheat-sheet inference: {title}" if show_progress else None,
+    )
     prompt_len: int = int(input_ids.shape[-1])
     decoded: str = tokenizer.decode(
         outputs[0, prompt_len:], skip_special_tokens=True

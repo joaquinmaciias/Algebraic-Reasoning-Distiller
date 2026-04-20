@@ -19,9 +19,8 @@ from __future__ import annotations
 import argparse
 from collections import defaultdict
 from pathlib import Path
-from typing import Any
 
-from utils.paths import check_cwd
+from tqdm.auto import tqdm
 
 from sair.agents.distiller import (
     load_distiller_model,
@@ -40,6 +39,7 @@ from sair.schemas import (
     EvidenceBundle,
     Problem,
 )
+from utils.paths import check_cwd
 
 
 def _structural_key(problem: Problem) -> str:
@@ -106,10 +106,17 @@ def _collect_evidences(
     problems: list[Problem],
     *,
     use_retriever: bool,
+    cluster_key: str,
 ) -> list[tuple[Problem, EvidenceBundle]]:
     """Run the offline pipeline on every problem in a cluster."""
     out: list[tuple[Problem, EvidenceBundle]] = []
-    for prob in problems:
+    for prob in tqdm(
+        problems,
+        desc=f"[cheatsheet] evidence {cluster_key}",
+        unit="problem",
+        dynamic_ncols=True,
+        leave=False,
+    ):
         bundle: EvidenceBundle = run_pipeline_sequential(
             prob, use_retriever=use_retriever
         )
@@ -168,10 +175,18 @@ def generate(
         CheatSheetEntry(title="HOW TO USE THIS CHEAT SHEET", body=preamble_body, priority=999)
     ]
 
-    for key, cluster in clusters.items():
-        print(f"[cheatsheet] cluster {key}: {len(cluster)} problems")
+    cluster_items = list(clusters.items())
+    for key, cluster in tqdm(
+        cluster_items,
+        desc="[cheatsheet] clusters",
+        unit="cluster",
+        dynamic_ncols=True,
+    ):
+        tqdm.write(f"[cheatsheet] cluster {key}: {len(cluster)} problems")
         collected: list[tuple[Problem, EvidenceBundle]] = _collect_evidences(
-            cluster, use_retriever=use_retriever
+            cluster,
+            use_retriever=use_retriever,
+            cluster_key=key,
         )
         evidence_texts: list[str] = [
             b.rendered_reasoning() or "No evidence." for _, b in collected
@@ -187,6 +202,7 @@ def generate(
             max_new_tokens=int(entry_max_new_tokens),
             max_examples=int(entry_max_examples),
             max_evidence_chars=int(entry_max_evidence_chars),
+            show_progress=True,
         )
         entries.append(
             CheatSheetEntry(

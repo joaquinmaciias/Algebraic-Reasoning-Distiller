@@ -1,0 +1,96 @@
+## MAGMA IMPLICATION CHEAT SHEET
+You are deciding whether Equation 1 implies Equation 2 over all magmas.
+A magma is a non-empty set with one binary operation * and no axioms.
+
+OUTPUT:
+- VERDICT: TRUE or FALSE
+- REASONING: brief but explicit
+- PROOF: required for TRUE
+- COUNTEREXAMPLE: required for FALSE
+
+FAST TRUE CHECKS:
+- Eq2 is syntactically identical on both sides, or Eq2 is Eq1 up to side swap and variable renaming.
+- Eq1 rewrites Eq2's left side to its right side by direct substitution instances.
+- Eq1 forces a projection law such as a*b=b or a*b=a, and Eq2 simplifies under that law.
+
+FAST FALSE CHECKS:
+- A single finite magma satisfying Eq1 and violating Eq2 proves FALSE.
+- If Eq1 is balanced in variable multiplicities but Eq2 is unbalanced, prioritize projection/XOR countermodels.
+- If Eq2 changes leftmost or rightmost leaf behavior not controlled by Eq1, try projection countermodels first.
+
+PROOF STRATEGY:
+1. Parse terms as binary trees.
+2. Canonicalize variables by first appearance and allow equation side swap.
+3. Instantiate Eq1 as a rewrite rule in both directions.
+4. Try to rewrite both sides of Eq2 to a common term.
+5. If Eq1 extracts an operation law, simplify Eq2 under that law.
+
+FALSE VALIDATION:
+- Give the domain and full table.
+- State that Eq1 holds for all assignments.
+- Give one assignment where Eq2 fails and show the two evaluated values.
+
+CAUTION:
+- Do not conclude TRUE from "no small counterexample".
+- Do not conclude TRUE from one operation form unless Eq1 proves that form.
+- Prefer FALSE only with a verified table; prefer TRUE only with a derivation.
+
+## Lemma pack vars4_m4_n4 (4 problems)
+PATTERN:
+
+TRUE-WHEN: none found after checking 19699 magmas in 0.04s.
+
+FALSE-WHEN: order-3 magma refutes E1 => E2.
+
+KEY-STEPS:
+ .
+
+## Lemma pack vars5_m4_n4 (4 problems)
+PATTERN:
+
+TRUE-WHEN: none found after checking 19699 magmas in 0.13s.
+FALSE-WHEN: order-2 magma refutes E1 => E2.
+KEY-STEPS:
+ .
+
+## Lemma pack vars3_m4_n4 (4 problems)
+PATTERN:
+
+TRUE-WHEN:
+
+FALSE-WHEN:
+
+KEY-STEPS:
+
+## Lemma pack vars3_m3_n4 (4 problems)
+PATTERN:
+
+TRUE-WHEN:
+
+FALSE-WHEN:
+
+## Problem
+
+Equation 1: {{ equation1 }}
+Equation 2: {{ equation2 }}
+
+## Required output format
+
+Respond with exactly:
+
+<think>
+Your reasoning here.
+</think>
+<answer>
+VERDICT: TRUE
+REASONING: ...
+PROOF: ...
+</answer>
+
+Or if false:
+
+<answer>
+VERDICT: FALSE
+REASONING: ...
+COUNTEREXAMPLE: ...
+</answer>

@@ -2,9 +2,46 @@ Normal: 0-19, 20-27, 30, 31 (15T 15F)
 Hard: 0, 1, 2, 6, 7, 12, 22, 23, 26, 27, 33, 34, 35, 36, 39, 40, 41, 42, 43, 44 (10T 10F)
 
 Full Cheatsheet: Primer valor es predicted, segundo ground truth. NV means no VERDICT found in response
-- Normals: TT, TT, FF, TT, TT, FF, TT, FF, TT, TT, 
-	   TT, FF, TT, TF, TF, FF, FF, TT, FF, FF
-	   FF, TT, TT, FF, FF, FF, FF, TT, TT, TT
+- Normal: TT, TT, FF, TT, TT, FF, TT, FF, TT, TT, 
+	  TT, FF, TT, TF, TF, FF, FF, TT, FF, FF,
+	  FF, TT, TT, FF, FF, FF, FF, TT, TT, TT
 
-- Hard:    TF, TF, TT, TT, NV, TT, TT, TF, TT, TF
-	   TT, TT, TF, TF, FT, TT, TF, TF, TT, FF
+- Hard:   TF, TF, TT, TT, NV, TT, TT, TF, TT, TF,
+	  TT, TT, TF, TF, FT, TT, TF, TF, TT, FF
+
+No Symbolic True:
+- Normal: TT, TT, FF, TT, TT, FF, TT, FF, TT, TT,
+	  TT, TF, TT, FF, FF, FF, FF, TT, TF, FF,
+	  FF, TT, FT, FF, FF, TF, FF, TF, TT, TT
+
+- Hard:   FF, FF, TT, TT, FF, TT, TT, TF, TT, TF,
+	  TT, FT, FF, TF, TT, TT, FF, TF, TT, TF
+	  
+
+No Countermodel Family:
+- Normal: TT, TT, FF, TT, TT, FF, TT, FF, TT, TT,
+	  TT, TF, TT, FF, FF, FF, FF, TT, FF, FF,
+	  FF, TT, NV, FF, FF, TF, FF, TT, TT, TT
+	   
+
+- Hard:  FF, TF, TT, TT, TF, TT, TT, NV, TT, TF,
+	 TT, TT, TF, TF, TT, TT, TF, TF, TT, TF
+
+Neither:
+- Normal: TT, TT, FF, TT, TT, FF, TT, FF, TT, TT,
+	  TT, TF, TT, TF, FF, TF, FT, TT, FF, TF,
+	  FT, TT, TT, FF, FF, TF, FF, TT, FF, FT
+
+- Hard:   TF, TF, TT, TT, TF, TT, TT, FF, FT, TF,
+	  TT, TT, TF, TF, TT, TF, TF, TF, TT, TF			  
+
+Baseline:
+- Normal: FT, TT, FF, FT, TT, FF, FT, FF, TT, TT,
+	  TT, TF, TT, FF, FF, FF, FF, FT, FF, FF,
+	  FF, TT, TT, FF, FF, TF, FF, FT, FT, TT
+
+- Hard:   TF, TF, TT, TT, TF, TT, TT, TF, FT, TF,
+	  TT, FT, TF, FF, FT, TT, TF, TF, TF, TT
+
+
+Example of Problem Hard 26: Baseline FT, Complete TT:

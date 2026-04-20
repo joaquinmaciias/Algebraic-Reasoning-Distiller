@@ -129,6 +129,10 @@ def generate(
     max_per_cluster: int,
     use_retriever: bool,
     max_bytes: int,
+    entry_max_bytes: int,
+    entry_max_new_tokens: int,
+    entry_max_examples: int,
+    entry_max_evidence_chars: int,
 ) -> Path:
     """Build the cheat sheet and write it to disk. Returns the output path."""
     SAIR_CHEATSHEETS_DIR.mkdir(parents=True, exist_ok=True)
@@ -179,7 +183,10 @@ def generate(
             model=model,
             tokenizer=tokenizer,
             cfg=cfg,
-            max_bytes=1_200,
+            max_bytes=int(entry_max_bytes),
+            max_new_tokens=int(entry_max_new_tokens),
+            max_examples=int(entry_max_examples),
+            max_evidence_chars=int(entry_max_evidence_chars),
         )
         entries.append(
             CheatSheetEntry(
@@ -213,6 +220,10 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--max-per-cluster", type=int, default=6)
     parser.add_argument("--no-retriever", action="store_true")
     parser.add_argument("--max-bytes", type=int, default=10_000)
+    parser.add_argument("--entry-max-bytes", type=int, default=900)
+    parser.add_argument("--entry-max-new-tokens", type=int, default=192)
+    parser.add_argument("--entry-max-examples", type=int, default=3)
+    parser.add_argument("--entry-max-evidence-chars", type=int, default=900)
     return parser.parse_args()
 
 
@@ -224,6 +235,10 @@ def main() -> None:
         max_per_cluster=int(args.max_per_cluster),
         use_retriever=not bool(args.no_retriever),
         max_bytes=int(args.max_bytes),
+        entry_max_bytes=int(args.entry_max_bytes),
+        entry_max_new_tokens=int(args.entry_max_new_tokens),
+        entry_max_examples=int(args.entry_max_examples),
+        entry_max_evidence_chars=int(args.entry_max_evidence_chars),
     )
 
 

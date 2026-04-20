@@ -88,6 +88,13 @@ def _strip_verdict_blocks(text: str) -> str:
     return result.strip()
 
 
+def _truncate_text(text: str, *, max_chars: int) -> str:
+    """Bound prompt size while preserving the start of the evidence."""
+    if len(text) <= max_chars:
+        return text
+    return f"{text[:max_chars].rstrip()}\n[truncated]"
+
+
 def _build_bnb_config(*, use_4bit: bool) -> BitsAndBytesConfig | None:
     """Match the 4-bit NF4 BF16 setup used by rlm training."""
     if not use_4bit:
@@ -140,6 +147,7 @@ def load_distiller_model(
         device_map="auto",
     )
     model.config.pad_token_id = int(tokenizer.pad_token_id)
+    model.config.use_cache = True
     model.generation_config.pad_token_id = int(tokenizer.pad_token_id)
     model.generation_config.eos_token_id = int(tokenizer.eos_token_id)
 
@@ -241,6 +249,9 @@ def synthesize_cheat_sheet_entry(
     tokenizer: PreTrainedTokenizerBase,
     cfg: SAIR_INFERENCE_CONFIG | None = None,
     max_bytes: int = 1_200,
+    max_new_tokens: int | None = None,
+    max_examples: int = 3,
+    max_evidence_chars: int = 900,
 ) -> str:
     """Ask the distiller to summarize one cluster into a short lemma block.
 
@@ -254,12 +265,16 @@ def synthesize_cheat_sheet_entry(
     cfg = cfg or SAIR_INFERENCE_CONFIG()
 
     # Build a verdict-annotated example list for better heuristic grounding.
+    n_examples: int = max(1, int(max_examples))
     examples_block: str = "\n".join(
         f"- {p.equation1}  =>  {p.equation2}"
         + (f"  [ground truth: {'TRUE' if p.answer else 'FALSE'}]" if p.answer is not None else "")
-        for p in cluster_problems[:6]
+        for p in cluster_problems[:n_examples]
     )
-    evidences_block: str = "\n\n".join(cluster_evidences[:6])
+    evidences_block: str = "\n\n".join(
+        _truncate_text(evidence, max_chars=int(max_evidence_chars))
+        for evidence in cluster_evidences[:n_examples]
+    )
 
     # Count TRUE/FALSE split so the model knows the distribution.
     n_true = sum(1 for p in cluster_problems if p.answer is True)
@@ -274,7 +289,8 @@ def synthesize_cheat_sheet_entry(
         "as a SAIR reasoning answer. Include a short <think> section and an "
         "<answer> section with VERDICT, REASONING, and either PROOF or "
         "COUNTEREXAMPLE. Prefer concrete algebraic patterns, small Cayley-table "
-        "counterexamples, and reusable proof strategies."
+        "counterexamples, and reusable proof strategies. Keep the whole block "
+        "under 180 words and close all XML tags."
     )
 
     messages: list[dict[str, str]] = [
@@ -293,7 +309,7 @@ def synthesize_cheat_sheet_entry(
 
     gen_kwargs: dict[str, Any] = {
         "input_ids": input_ids,
-        "max_new_tokens": int(cfg.max_new_tokens),
+        "max_new_tokens": int(max_new_tokens or min(int(cfg.max_new_tokens), 192)),
         "pad_token_id": int(tokenizer.pad_token_id),
         "eos_token_id": int(tokenizer.eos_token_id),
         "do_sample": False,

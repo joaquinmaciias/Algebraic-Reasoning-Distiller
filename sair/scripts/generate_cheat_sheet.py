@@ -22,10 +22,6 @@ from pathlib import Path
 
 from tqdm.auto import tqdm
 
-from sair.agents.distiller import (
-    load_distiller_model,
-    synthesize_cheat_sheet_entry,
-)
 from sair.config import (
     REPO_DIR,
     SAIR_CHEATSHEETS_DIR,
@@ -40,6 +36,52 @@ from sair.schemas import (
     Problem,
 )
 from utils.paths import check_cwd
+
+STATIC_CHEAT_SHEET_BODY: str = """You are deciding whether Equation 1 implies Equation 2 over all magmas.
+A magma is a non-empty set with one binary operation * and no axioms.
+
+OUTPUT:
+- VERDICT: TRUE or FALSE
+- REASONING: brief but explicit
+- PROOF: required for TRUE
+- COUNTEREXAMPLE: required for FALSE
+
+FAST TRUE CHECKS:
+- Eq2 is syntactically identical on both sides, or Eq2 is Eq1 up to side swap and variable renaming.
+- Eq1 rewrites Eq2's left side to its right side by direct substitution instances.
+- Eq1 forces a projection law such as a*b=b or a*b=a, and Eq2 simplifies under that law.
+
+FAST FALSE CHECKS:
+- A single finite magma satisfying Eq1 and violating Eq2 proves FALSE.
+- If Eq1 is balanced in variable multiplicities but Eq2 is unbalanced, prioritize projection/XOR countermodels.
+- If Eq2 changes leftmost or rightmost leaf behavior not controlled by Eq1, try projection countermodels first.
+
+COUNTERMODEL FAMILY:
+- Left projection: x*y=x. Any term evaluates to its leftmost leaf.
+- Right projection: x*y=y. Any term evaluates to its rightmost leaf.
+- XOR on {0,1}: x*y=x+y mod 2. A law holds iff each variable has equal parity on both sides.
+- Constant-zero: x*y=0. Useful when Eq1 collapses all compound terms but Eq2 exposes a variable.
+- Left shift mod 3: x*y=x+1 mod 3. Tracks left spine depth.
+- Right shift mod 3: x*y=y+1 mod 3. Tracks right spine depth.
+- Boolean AND/OR on {0,1}. Useful for absorption/idempotence-shaped laws.
+- Near-projections on {0,1,2}: start from x*y=x or x*y=y and perturb one row/column entry.
+
+PROOF STRATEGY:
+1. Parse terms as binary trees.
+2. Canonicalize variables by first appearance and allow equation side swap.
+3. Instantiate Eq1 as a rewrite rule in both directions.
+4. Try to rewrite both sides of Eq2 to a common term.
+5. If Eq1 extracts an operation law, simplify Eq2 under that law.
+
+FALSE VALIDATION:
+- Give the domain and full table.
+- State that Eq1 holds for all assignments.
+- Give one assignment where Eq2 fails and show the two evaluated values.
+
+CAUTION:
+- Do not conclude TRUE from "no small counterexample".
+- Do not conclude TRUE from one operation form unless Eq1 proves that form.
+- Prefer FALSE only with a verified table; prefer TRUE only with a derivation."""
 
 
 def _structural_key(problem: Problem) -> str:
@@ -64,6 +106,10 @@ def _cluster_problems(
     other half to FALSE-majority clusters so the cheat sheet does not bias
     the downstream judge toward either verdict.
     """
+    if max_clusters <= 0:
+        print("[cheatsheet] static-only mode: no learned clusters selected")
+        return {}
+
     buckets: dict[str, list[Problem]] = defaultdict(list)
     for p in problems:
         buckets[_structural_key(p)].append(p)
@@ -156,23 +202,27 @@ def generate(
     )
     print(f"[cheatsheet] selected {len(clusters)} clusters")
 
-    print("[cheatsheet] loading distiller model...")
     cfg: SAIR_INFERENCE_CONFIG = SAIR_INFERENCE_CONFIG()
-    model, tokenizer, adapter_label = load_distiller_model(cfg=cfg)
-    print(f"[cheatsheet] distiller adapter: {adapter_label}")
+    adapter_label = "none"
+    model = None
+    tokenizer = None
+    synthesize_cheat_sheet_entry = None
+    if clusters:
+        from sair.agents.distiller import (
+            load_distiller_model,
+            synthesize_cheat_sheet_entry,
+        )
 
-    # Preamble entry: tells the judge how to read the cheat sheet.
-    preamble_body: str = (
-        "Each section below contains heuristics for a structural cluster of "
-        "equational-implication problems over magmas (binary op `*`, no axioms).\n"
-        "- TRUE-WHEN: conditions under which E1 logically implies E2.\n"
-        "- FALSE-WHEN: conditions under which a small counterexample exists.\n"
-        "- KEY-STEPS: proof sketch or counterexample construction.\n"
-        "Use these heuristics as a guide, not a lookup table. "
-        "Always verify with a short reasoning chain before issuing a VERDICT."
-    )
+        print("[cheatsheet] loading distiller model...")
+        model, tokenizer, adapter_label = load_distiller_model(cfg=cfg)
+        print(f"[cheatsheet] distiller adapter: {adapter_label}")
+
     entries: list[CheatSheetEntry] = [
-        CheatSheetEntry(title="HOW TO USE THIS CHEAT SHEET", body=preamble_body, priority=999)
+        CheatSheetEntry(
+            title="MAGMA IMPLICATION CHEAT SHEET",
+            body=STATIC_CHEAT_SHEET_BODY,
+            priority=999,
+        )
     ]
 
     cluster_items = list(clusters.items())
@@ -191,6 +241,8 @@ def generate(
         evidence_texts: list[str] = [
             b.rendered_reasoning() or "No evidence." for _, b in collected
         ]
+        if synthesize_cheat_sheet_entry is None:
+            raise RuntimeError("cheat-sheet synthesizer was not loaded")
         body: str = synthesize_cheat_sheet_entry(
             title=key,
             cluster_problems=[p for p, _ in collected],

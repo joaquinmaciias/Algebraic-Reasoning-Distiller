@@ -51,18 +51,20 @@ SYNTHESIS_SYSTEM_PROMPT: str = (
     "Your task: given a cluster of related equational-theory problems "
     "(each asking whether Equation 1 implies Equation 2 over all magmas) "
     "and the evidence collected by a symbolic solver, distill the key "
-    "patterns into 3-8 bullet-point heuristics a reader can apply "
-    "to unseen analogous problems.\n"
+    "patterns into reusable heuristics a reader can apply to unseen "
+    "analogous problems.\n"
     "\n"
     "Output format — use ONLY these sections:\n"
-    "  PATTERN: <one-sentence description of the structural pattern>\n"
-    "  TRUE-WHEN: <conditions under which E1 implies E2>\n"
-    "  FALSE-WHEN: <conditions under which a counterexample exists>\n"
-    "  KEY-STEPS: <compact proof strategy or counterexample construction tip>\n"
+    "PATTERN:\n"
+    "TRUE-WHEN:\n"
+    "FALSE-WHEN:\n"
+    "KEY-STEPS:\n"
     "\n"
     "Rules:\n"
-    "- Write at most 300 words total.\n"
-    "- Do NOT write VERDICT:, <answer>, <think>, TRUE, FALSE as standalone tokens.\n"
+    "- Write at most 170 words total.\n"
+    "- Do NOT write VERDICT, <answer>, <think>, PROOF, or COUNTEREXAMPLE headers.\n"
+    "- Do NOT emit Cayley tables copied from individual examples.\n"
+    "- Do NOT claim a universal implication unless the evidence contains a proof.\n"
     "- Do NOT restate the equations verbatim.\n"
     "- Be precise: use variable names like x, y, z and operator *.\n"
 )
@@ -373,16 +375,13 @@ def synthesize_cheat_sheet_entry(
         f"Cluster: {title} {split_note}\n\n"
         f"Representative problems (with ground truth):\n{examples_block}\n\n"
         f"Evidence from the symbolic solver:\n{evidences_block}\n\n"
-        "Write a compact cheat-sheet block for this cluster in the same format "
-        "as a SAIR reasoning answer. Include a short <think> section and an "
-        "<answer> section with VERDICT, REASONING, and either PROOF or "
-        "COUNTEREXAMPLE. Prefer concrete algebraic patterns, small Cayley-table "
-        "counterexamples, and reusable proof strategies. Keep the whole block "
-        "under 180 words and close all XML tags."
+        "Write a compact cheat-sheet note for future analogous problems. "
+        "Generalize from the evidence; do not answer any representative problem. "
+        "Use only PATTERN, TRUE-WHEN, FALSE-WHEN, and KEY-STEPS."
     )
 
     messages: list[dict[str, str]] = [
-        {"role": "system", "content": str(cfg.system_prompt)},
+        {"role": "system", "content": SYNTHESIS_SYSTEM_PROMPT},
         {"role": "user", "content": user_prompt},
     ]
 
@@ -415,7 +414,18 @@ def synthesize_cheat_sheet_entry(
         outputs[0, prompt_len:], skip_special_tokens=True
     ).strip()
 
-    # decoded = _strip_verdict_blocks(decoded)
+    decoded = _strip_verdict_blocks(decoded)
+    if not decoded:
+        decoded = (
+            "PATTERN:\n"
+            "- This cluster did not yield a reliable compressed pattern.\n"
+            "TRUE-WHEN:\n"
+            "- Use only if Eq2 is obtained from Eq1 by explicit substitution or rewriting.\n"
+            "FALSE-WHEN:\n"
+            "- Prefer a verified finite magma satisfying Eq1 and violating Eq2.\n"
+            "KEY-STEPS:\n"
+            "- Test projections, XOR parity, and small perturbed 3-element tables first."
+        )
 
     # Hard byte cap so the final render stays under 10KB.
     encoded: bytes = decoded.encode("utf-8")

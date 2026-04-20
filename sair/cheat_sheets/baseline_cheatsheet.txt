@@ -1,0 +1,35 @@
+## MAGMA IMPLICATION CHEAT SHEET
+You are deciding whether Equation 1 implies Equation 2 over all magmas.
+A magma is a non-empty set with one binary operation * and no axioms.
+
+OUTPUT:
+- VERDICT: TRUE or FALSE
+- REASONING: brief but explicit
+- PROOF: required for TRUE
+- COUNTEREXAMPLE: required for FALSE
+
+## Problem
+
+Equation 1: {{ equation1 }}
+Equation 2: {{ equation2 }}
+
+## Required output format
+
+Respond with exactly:
+
+<think>
+Your reasoning here.
+</think>
+<answer>
+VERDICT: TRUE
+REASONING: ...
+PROOF: ...
+</answer>
+
+Or if false:
+
+<answer>
+VERDICT: FALSE
+REASONING: ...
+COUNTEREXAMPLE: ...
+</answer>

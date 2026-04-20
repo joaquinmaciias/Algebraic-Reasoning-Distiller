@@ -29,7 +29,7 @@ import torch
 from tqdm.auto import tqdm
 from transformers import PreTrainedModel, PreTrainedTokenizerBase
 
-from sair.agents.distiller import _generate_with_progress
+from sair.agents.distiller import _generate_with_progress, resolve_model_input_device
 from sair.config import SAIR_INFERENCE_CONFIG, SAIR_JUDGE_REPO
 from sair.schemas import Problem, RunMetrics
 
@@ -124,7 +124,7 @@ def _answer_problem_local(
         add_generation_prompt=True,
         return_tensors="pt",
         return_dict=True,
-    ).to(model.device)
+    ).to(resolve_model_input_device(model))
     input_ids: torch.Tensor = model_inputs["input_ids"]
 
     gen_kwargs: dict[str, Any] = {

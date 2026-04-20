@@ -119,6 +119,27 @@ def _resolve_checkpoint(cfg: SAIR_INFERENCE_CONFIG) -> Path | None:
     return None
 
 
+def resolve_model_input_device(model: PreTrainedModel) -> torch.device:
+    """Return the device where prompt tensors should be placed for generation."""
+    for candidate in (model, getattr(model, "base_model", None)):
+        device_map = getattr(candidate, "hf_device_map", None)
+        if not isinstance(device_map, dict):
+            continue
+        for device in device_map.values():
+            if isinstance(device, int):
+                return torch.device(f"cuda:{device}")
+            if isinstance(device, str) and device.startswith("cuda"):
+                return torch.device(device)
+
+    for parameter in model.parameters():
+        if parameter.device.type != "meta":
+            return parameter.device
+
+    if torch.cuda.is_available():
+        return torch.device("cuda:0")
+    return torch.device("cpu")
+
+
 class _TqdmTokenStreamer(BaseStreamer):
     """Update a tqdm bar as HuggingFace emits generated token ids."""
 
@@ -277,7 +298,7 @@ def run_distiller(
         add_generation_prompt=True,
         return_tensors="pt",
         return_dict=True,
-    ).to(model.device)
+    ).to(resolve_model_input_device(model))
     input_ids: torch.Tensor = model_inputs["input_ids"]
 
     gen_kwargs: dict[str, Any] = {
@@ -371,7 +392,7 @@ def synthesize_cheat_sheet_entry(
         add_generation_prompt=True,
         return_tensors="pt",
         return_dict=True,
-    ).to(model.device)
+    ).to(resolve_model_input_device(model))
     input_ids: torch.Tensor = model_inputs["input_ids"]
 
     gen_kwargs: dict[str, Any] = {

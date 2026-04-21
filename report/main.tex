@@ -194,7 +194,14 @@ The performance of the system was evaluated mainly through the accuracy in the c
 
 \subsection{Main Results}
 
-The complete system achieved an accuracy of \textbf{0.765} on the test set. In order to have a better understanding of the performance of the system, we also run the same test set with a baseline configuration (this is, the same model without fine-tuning and with the baseline cheatsheet, which only includes the general instructions and the expected output format). In this case, the accuracy was of \textbf{X.XXX}, which suggests that the fine-tuning of the model and the generated content in the cheatsheet are both contributing to the performance of the system. Despite this improvement, the system still shows some limitations, such as a bias towards classifying problems as \textbf{False}, as we can see in Figure \ref{fig:confusion_matrix}.
+The complete system achieved an accuracy of \textbf{0.765} on the test set. Despite these promising results, the system still shows some limitations, such as a bias towards classifying problems as \textbf{False}, as we can see in Figure \ref{fig:confusion_matrix}.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.7\textwidth]{figures/results-confusion-matrix.jpeg}
+  \caption{Confusion matrix of the complete system on the test set.}
+  \label{fig:confusion_matrix}
+\end{figure}
 
 This partiality may be due to two main factors: (i) the generated cheatsheet may be providing too many patterns and heuristics for finding counterexamples, which may serve as a sort of \textit{inductive bias} towards classifying problems as \textbf{False} (as finding a single counterexample is sufficient to classify a problem as \textbf{False}, while proving that an implication holds in all magmas is a much more complex task), and (ii) LLMs might, by pure nature, assume that the absence of a proof is a strong signal of the implication being false, which is not necessarily the case in this kind of problems (as we have seen, the symbolic prover is designed to be conservative, so a negative result does not necessarily mean that the implication is false). These limitations are intriguing and show up again in the following section.
 
@@ -230,9 +237,9 @@ In Table \ref{fig:ablation_results} we show the results obtained for each config
     \toprule
     \textbf{Variant} & \textbf{TT} & \textbf{TF} & \textbf{FT} & \textbf{FF} & \textbf{NV} & \textbf{Acc.} & \textbf{Err.} \\
     \midrule
-    Full Cheatsheet  & 24          & 10          & 1           & 14          & 1           & 0.76          & 0.24          \\
+    Full Cheatsheet  & 24          & 10          & 1           & 14          & 1           & 0.76          & 0.22          \\
     No Symbolic True & 22          & 9           & 2           & 17          & 0           & 0.78          & 0.22          \\
-    No Countermodel  & 24          & 10          & 0           & 14          & 2           & 0.76          & 0.24          \\
+    No Countermodel  & 24          & 10          & 0           & 14          & 2           & 0.76          & 0.20          \\
     Neither          & 21          & 15          & 4           & 10          & 0           & 0.62          & 0.38          \\
     Baseline         & 16          & 11          & 9           & 14          & 0           & 0.60          & 0.40          \\
     \bottomrule

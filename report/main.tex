@@ -78,8 +78,7 @@
 \maketitle
 
 \begin{abstract}
-    This project explores the potential of multi-agent collaboration in enhancing the mathematical problem-solving capabilities of large language models (LLMs). We propose a pipeline that integrates six different agents, each specializing in a distinct aspect of mathematical reasoning, to collaboratively solve complex problems. The agents include a Planner, a Counterexample Generator, a Symbolic Prover, a RAG Retriever, an Aggregator, and a Distiller. All this is done in order to solve the problems of the Mathematics Distillation Challenge - Equational Theories.
-    % Completar después con métricas y demás
+  This project explores the potential of multi-agent collaboration in enhancing the mathematical problem-solving capabilities of large language models (LLMs). We propose a pipeline that integrates six different agents, each specializing in a distinct aspect of mathematical reasoning, to collaboratively solve complex problems. The agents include a Planner, a Counterexample Generator, a Symbolic Prover, a RAG Retriever, an Aggregator, and a Distiller. Our results show that training and running this agent \textit{offline} can be a powerful way to distill mathematical knowledge into a compact file, which can then be used to solve problems in an \textit{online} setting with a single call to a constrained LLM. This enables any base model to solve complex mathematical problems effectively without the need to perform expensive reasoning during inference.
 \end{abstract}
 
 \section{Introduction}
@@ -97,35 +96,35 @@ Our project builds upon this idea of supervised fine-tuning, but takes it a step
 Let a \textbf{magma} be a set $M$ equipped with a binary operation $\cdot : M \times M \to M$ (no associativity, commutativity or identity element are assumed). An \textbf{equational theory} is a set of equations that hold for all elements of the magma. The goal of the Mathematics Distillation Challenge - Equational Theories is to develop a system that can effectively solve problems related to equational theories. Specifically, given two equations $E_1$ and $E_2$, the system should determine whether $E_1$ implies $E_2$ under every interpretation of the magma (this is, if every magma satisfying $E_1$ also satisfies $E_2$). A given example of this problem is the following:
 
 \begin{equation}
-    \begin{aligned}
-        x * y       & = z * (w * (u * u)) \\
-        x * (y * y) & = (z * w) * z
-    \end{aligned}
+  \begin{aligned}
+    x * y       & = z * (w * (u * u)) \\
+    x * (y * y) & = (z * w) * z
+  \end{aligned}
 \end{equation}
 In this case, the equation is \textbf{True}. The system must generate a cheatsheet that contains the necessary information to solve this kind of problems (which is then fed to a constrained LLM that must solve the problem based on the information in the cheatsheet). The cheatsheet should include relevant definitions, properties, and examples of equational theories, as well as any other information that can help the LLM to understand and solve the problem effectively.
 
 The competition operates under a set of constraints that limit the computational resources available to the participants:
 \begin{itemize}
-    \item The generated cheatsheet must be static and no greater than 10 KB in size.
-    \item No tools may be used during the evaluation phase, and the LLM must rely solely on the information provided in the cheatsheet to solve the problem.
-    \item The budget for each problem is limited to 10 minutes and the equivalent of $0.01$ USD in computational resources.
+  \item The generated cheatsheet must be static and no greater than 10 KB in size.
+  \item No tools may be used during the evaluation phase, and the LLM must rely solely on the information provided in the cheatsheet to solve the problem.
+  \item The budget for each problem is limited to 10 minutes and the equivalent of $0.01$ USD in computational resources.
 \end{itemize}
 
 These constraints motivate our approach of \textit{offline} distillation: the computationally expensive parts of the process (counterexample search, RAG,multi-agent reasoning, etc.) are performed during the training phase. during the evaluation phase, the system only needs the use of a cheatsheet and a single call to the LLM.
 
 \section{Method}
 
-Our solution, ARD (Algebraic Reasoning Distiller), follows the paradigm \textit{distill, then deploy}. In its \textit{offline} setting, the multi-agent system analyzes the training dataset of problems and`produces \textit{evidence bundles}. These are then used to both generate the final cheatsheet and to fine-tune a pretrained LLM, which is then deployed in the \textit{online} setting to solve the test problems based on the generated cheatsheet.
+Our solution, ARD (Algebraic Reasoning Distiller), follows the paradigm \textbf{distill, then deploy}. In its \textit{offline} setting, the multi-agent system analyzes the training dataset of problems and`produces \textit{evidence bundles}. These are then used to both generate the final cheatsheet and to fine-tune a pretrained LLM, which is then deployed in the \textit{online} setting to solve the test problems based on the generated cheatsheet.
 
 \subsection{System Architecture}
 
 The multi-agent system consists of 5 sequential nodes, each responsible for a specific aspect of the problem-solving process. Below, we include a graphic to illustrate the architecture of the system, followed by a detailed description of each agent's role and functionality:
 
 \begin{figure}[H]
-    \centering
-    \includegraphics[width=0.8\textwidth]{figures/architecture.png}
-    \caption{Architecture of the multi-agent system.}
-    \label{fig:architecture}
+  \centering
+  \includegraphics[width=0.8\textwidth]{figures/architecture.png}
+  \caption{Architecture of the multi-agent system.}
+  \label{fig:architecture}
 \end{figure}
 
 
@@ -142,9 +141,9 @@ Recovers relevant information from a knowledge base of equational theories. In s
 
 This agent attempts to prove the implication \( E_1 \implies E_2 \) using symbolic manipulation. It applies a predefined list of strategies:
 \begin{enumerate}
-    \item \textbf{Alpha-equivalence}: Check if \( E_1 \) and \( E_2 \) are the same up to variable renaming.
-    \item \textbf{Substitution}: Attempt to substitute terms in \( E_1 \) to derive \( E_2 \).
-    \item \textbf{Rewriting}: Use the retrieved equations to rewrite \( E_1 \) and see if it can be transformed into \( E_2 \).
+  \item \textbf{Alpha-equivalence}: Check if \( E_1 \) and \( E_2 \) are the same up to variable renaming.
+  \item \textbf{Substitution}: Attempt to substitute terms in \( E_1 \) to derive \( E_2 \).
+  \item \textbf{Rewriting}: Use the retrieved equations to rewrite \( E_1 \) and see if it can be transformed into \( E_2 \).
 \end{enumerate}
 This component is deliberately designed to be overly conservative: a negative result does not necessarily mean that the implication is false, but a positive result is a strong signal of the implication being true.
 
@@ -152,8 +151,8 @@ This component is deliberately designed to be overly conservative: a negative re
 
 Tries to find a counterexample that satisfies \( E_1 \) but not \( E_2 \). It searches increasingly complex magmas (starting from a single-element set and increasing the number of elements) and checks if there exists an interpretation that satisfies \( E_1 \) but not \( E_2 \), applying a different heuristic depending on the order:
 \begin{itemize}
-    \item \textbf{Orders 2 and 3}: Exhaustive search over all possible interpretations. There are only 16 possible magmas of order 2 and 19,683 of order 3, which makes this approach feasible.
-    \item \textbf{Order 4:} Random sampling of 20,000 Cayley tables \footnote{A Cayley table is a mathematical table that describes the operation of a magma. It lists the results of applying the binary operation to every possible pair of elements in the set.} (out of the over 4 billion possible magmas of order 4) and checking if any of them satisfies \( E_1 \) but not \( E_2 \).
+  \item \textbf{Orders 2 and 3}: Exhaustive search over all possible interpretations. There are only 16 possible magmas of order 2 and 19,683 of order 3, which makes this approach feasible.
+  \item \textbf{Order 4:} Random sampling of 20,000 Cayley tables \footnote{A Cayley table is a mathematical table that describes the operation of a magma. It lists the results of applying the binary operation to every possible pair of elements in the set.} (out of the over 4 billion possible magmas of order 4) and checking if any of them satisfies \( E_1 \) but not \( E_2 \).
 \end{itemize}
 For every candidate, all possible variable assignments are checked by means of a cartesian product iteration with mixed-radix counting (to account for the different number of elements in each order). A single counterexample is sufficient to conclude that the implication is false, but if no counterexample is found, no conclusion can be drawn.
 
@@ -161,39 +160,43 @@ For every candidate, all possible variable assignments are checked by means of a
 
 The aggregator takes the outputs of the previous agents and generates a priority policy:
 \begin{itemize}
-    \item If the Symbolic Prover finds a proof, the implication is classified as \textbf{True} with confidence 0.9.
-    \item If the Counterexample Generator finds a counterexample, the implication is classified as \textbf{False} with confidence 1.0.
-    \item If neither of the above agents finds a conclusive result, the implication is classified as None with confidence 0.0.
+  \item If the Symbolic Prover finds a proof, the implication is classified as \textbf{True} with confidence 0.9.
+  \item If the Counterexample Generator finds a counterexample, the implication is classified as \textbf{False} with confidence 1.0.
+  \item If neither of the above agents finds a conclusive result, the implication is classified as None with confidence 0.0.
 \end{itemize}
-
-An illustrative example of this pipeline can be found in Appendix \ref{appendix:pipeline_example}.
 
 \subsection{Architectural Details}
 
 In addition to the specific algorithms and heuristics implemented in each agent, there are two key architectural details that are worth mentioning:
 
 \begin{itemize}
-    \item \textbf{Distilled LLM Agent}: This agent is responsible for generating the final cheatsheet based on the evidence bundles produced by the multi-agent system. It uses a pretrained LLM, in our case Qwen2.5-7B-Instruct \cite{qwen25_7b}, quantized to 4 bits and using BF16 precision for the attention mechanism. The model is fine-tuned on the training dataset using LoRA \cite{hu2021lora} with a rank of 16, $\alpha$ of 32 and a dropout of 0.05. During inference, the model operates under two different modes:
-          \begin{itemize}
-              \item \textbf{Problem-specific:} Given an evidence bundle and the (optional) retrieved context, the model generates an structured answer that includes the tokens \texttt{<think>}, \texttt{</think>}, \texttt{<answer>} and \texttt{</answer>}.
-              \item \textbf{General-purpose:} Given a set of evidence bundles, the model generates a compact \textit{lemma/heuristic} block using greedy decoding. This block is designed to be as informative as possible while being no greater than 1200 bytes in size (in order to fit the 10 KB limit for the final cheatsheet after including the retrieved context).
-          \end{itemize}
-    \item \textbf{FastAPI Server}: A lightweight API REST exposes the functionality of the multi-agent system, allowing the access through two endpoints: POST \texttt{/sair} (which runs the complete system under a given problem, returning a \texttt{SAIRResponse} object) and GET \texttt{/health} (checking that the server is running properly).
+  \item \textbf{Distilled LLM Agent}: This agent is responsible for generating the final cheatsheet based on the evidence bundles produced by the multi-agent system. It uses a pretrained LLM, in our case Qwen2.5-7B-Instruct \cite{qwen25_7b}, quantized to 4 bits and using BF16 precision for the attention mechanism. The model is fine-tuned on the training dataset using LoRA \cite{hu2021lora} with a rank of 16, $\alpha$ of 32 and a dropout of 0.05. During inference, the model operates under two different modes:
+        \begin{itemize}
+          \item \textbf{Problem-specific:} Given an evidence bundle and the (optional) retrieved context, the model generates an structured answer that includes the tokens \texttt{<think>}, \texttt{</think>}, \texttt{<answer>} and \texttt{</answer>}.
+          \item \textbf{General-purpose:} Given a set of evidence bundles, the model generates a compact \textit{lemma/heuristic} block using greedy decoding. This block is designed to be as informative as possible while being no greater than 1200 bytes in size (in order to fit the 10 KB limit for the final cheatsheet after including the retrieved context).
+        \end{itemize}
+  \item \textbf{FastAPI Server}: A lightweight API REST exposes the functionality of the multi-agent system, allowing the access through two endpoints: POST \texttt{/sair} (which runs the complete system under a given problem, returning a \texttt{SAIRResponse} object) and GET \texttt{/health} (checking that the server is running properly).
 \end{itemize}
 
 \section{Experiments and Results}
 % Duda de numero de problemas
-All the training and evaluation processes were conducted on a node of the DGX cluster (8 $\times$ NVIDIA H100 GPUs). The training dataset consists of 4,694 problems, divided into a training set consisting of an 80\% of the problems (3,755) and a validation set consisting of the remaining 20\% (939).
+All the training and evaluation processes were conducted on a node of the DGX cluster (8 $\times$ NVIDIA H100 GPUs). The training dataset consists of 4,694 problems \footnote{These were obtained from various sources, mainly the competition dataset}, divided into a training set consisting of an 80\% of the problems (3,755) and a validation set consisting of the remaining 20\% (939). Despite this, not all problems were used for fine-tuning the Distilled LLM Agent, as we only used those for which the multi-agent system was able to produce a coherent verdict with that of the ground truth. This decision was made to ensure that the model learns from correct examples and to avoid introducing noise into the training process. The final corpus consisted of around 1330 problems.
+
+Our experiments go along two main lines:
+\begin{itemize}
+  \item \textbf{Evaluation of the complete system:} We evaluate the performance of the complete system (this is, the fine-tuned Distilled LLM Agent with the complete cheatsheet) on a test set, which consists of 1,000 problems of normal difficulty.
+  \item \textbf{Ablation study on the cheatsheet:} We conduct an ablation study to analyze the contribution of different components of the generated cheatsheet to the performance of the system. In this case, we test the performance of a base model (without fine-tuning) with different variants of the generated cheatsheet, which are derived from the original one by removing specific components (such as symbolic heuristics or countermodel library).
+\end{itemize}
 
 \subsection{Evaluation Metrics}
 
-The performance of our system was evaluated using the following metrics:
-\begin{itemize}
-    \item \textbf{Accuracy}: Fraction of problems in which the VERDICT (True/False) is that of the ground truth.
-    \item \textbf{Parsing Accuracy}: Fraction of outputs which contain a line with the correct format \texttt{VERDICT: <True/False>} (regardless of whether the verdict is correct or not).
-    \item \textbf{Coverage}: Fraction of problems for which the system produces a non-empty verdict (regardless of whether it is correct or not).
-    \item \textbf{Average Inference Time}: Average time taken to produce a verdict for a given problem.
-\end{itemize}
+The performance of the system was evaluated mainly through the accuracy in the classification. Added to this, we include other auxiliary metrics such as any bias towards one of the classes (True or False). More advanced metrics (such as those pertaining the quality of the generated reasoning or the interpretability of the generated cheatsheet) were not considered in this work due to time constraints, but they are an interesting line of future research.
+
+\subsection{Main Results}
+
+The complete system achieved an accuracy of \textbf{0.765} on the test set. In order to have a better understanding of the performance of the system, we also run the same test set with a baseline configuration (this is, the same model without fine-tuning and with the baseline cheatsheet, which only includes the general instructions and the expected output format). In this case, the accuracy was of \textbf{X.XXX}, which suggests that the fine-tuning of the model and the generated content in the cheatsheet are both contributing to the performance of the system. Despite this improvement, the system still shows some limitations, such as a bias towards classifying problems as \textbf{False}, as we can see in Figure \ref{fig:confusion_matrix}.
+
+This partiality may be due to two main factors: (i) the generated cheatsheet may be providing too many patterns and heuristics for finding counterexamples, which may serve as a sort of \textit{inductive bias} towards classifying problems as \textbf{False} (as finding a single counterexample is sufficient to classify a problem as \textbf{False}, while proving that an implication holds in all magmas is a much more complex task), and (ii) LLMs might, by pure nature, assume that the absence of a proof is a strong signal of the implication being false, which is not necessarily the case in this kind of problems (as we have seen, the symbolic prover is designed to be conservative, so a negative result does not necessarily mean that the implication is false). These limitations are intriguing and show up again in the following section.
 
 \subsection{Cheatsheet Ablation Study}
 
@@ -207,43 +210,57 @@ In order to keep the comparations as fair as possible, we tested the same set of
 
 We try five difference variants derived from the original cheatsheet, which are the following:
 \begin{itemize}
-    \item \textbf{Full Cheatsheet}: The complete cheatsheet generated by the Distilled LLM Agent, including both the problem-specific answer and the general-purpose lemma/heuristic block (as it is quite extense, we don't include it in the report, but it is available in the code repository, under \texttt{sair/cheatsheets/final\_cheatsheet.txt}).
-    \item \textbf{No Symbolic TRUE heuristics}: We remove the part dubbed as \textit{Symbolic / Rewriting intuition} in the original cheatsheet, which includes heuristics and strategies such as \textit{syntactic identity up to variable renaming}, \textit{substitution} and \textit{projection-based reasoning}.
-    \item \textbf{No Countermodel Library}: We remove that component which is mainly responsible for quick search of counterexamples and canonical countermodels.
-    \item \textbf{Neither of the above}: We remove both the symbolic heuristics and the countermodel library, leaving only global instructions, output formatting, generic proof strategy and lemma pack stubs.
-    \item \textbf{Baseline}: A basic cheatsheet that only includes what the LLM must do (with no specific information about the how) and the expected structure of the output (required to be in the cheatsheet by the competition organizers). This configuration serves as a baseline to compare the performance of the other configurations and to assess the contribution of the generated content in the cheatsheet. We include this cheatsheet in Appendix \ref{appendix:baseline_cheatsheet}.
+  \item \textbf{Full Cheatsheet}: The complete cheatsheet generated by the Distilled LLM Agent, including both the problem-specific answer and the general-purpose lemma/heuristic block (as it is quite extense, we don't include it in the report, but it is available in the code repository, under \texttt{sair/cheatsheets/final\_cheatsheet.txt}).
+  \item \textbf{No Symbolic TRUE heuristics}: We remove the part dubbed as \textit{Symbolic / Rewriting intuition} in the original cheatsheet, which includes heuristics and strategies such as \textit{syntactic identity up to variable renaming}, \textit{substitution} and \textit{projection-based reasoning}.
+  \item \textbf{No Countermodel Library}: We remove that component which is mainly responsible for quick search of counterexamples and canonical countermodels.
+  \item \textbf{Neither of the above}: We remove both the symbolic heuristics and the countermodel library, leaving only global instructions, output formatting, generic proof strategy and lemma pack stubs.
+  \item \textbf{Baseline}: A basic cheatsheet that only includes what the LLM must do (with no specific information about the how) and the expected structure of the output (required to be in the cheatsheet by the competition organizers). This configuration serves as a baseline to compare the performance of the other configurations and to assess the contribution of the generated content in the cheatsheet. We include this cheatsheet in Appendix \ref{appendix:baseline_cheatsheet}.
 \end{itemize}
 Specific information on the parts removed in the variants \textbf{No Symbolic TRUE heuristics} and \textbf{No Countermodel Library} can be found in Appendices \ref{appendix:no_symbolic_true_heuristics_cheatsheet} and \ref{appendix:no_countermodel_library_cheatsheet}, respectively.
 
 \subsubsection{Results}
 
-We have included, in the Appendix \ref{appendix:input_output_examples}, an example of execution on the baseline cheatsheet and the full cheatsheet. We recommend the reader to consult these examples for a better understanding of the system's behavior, but they suggest that the complete cheat sheet is not just adding more text: it provides a better search space for reasoning. As we will briefly explain in the Section \ref{sec:limitations_future_work}, an intriguing future line of research would be to analyze the interpretability of the generated cheatsheets and the outputs to have a deeper understanding of the reasoning process of the system beyond the evaluation metrics.
+We have included, in the Appendix \ref{appendix:input_output_examples}, an example of execution on the baseline cheatsheet and the full cheatsheet. We recommend the reader to consult these examples for a better understanding of the system's behavior, but they suggest that the complete cheat sheet is not just adding more text: it provides a better search space for reasoning. It would be interesting to analyze the interpretability of the generated cheatsheets and the outputs to have a deeper understanding of the reasoning process of the system beyond the evaluation metrics.
+
+In Table \ref{fig:ablation_results} we show the results obtained for each configuration, where \texttt{TF}, f.e., stands for the problems that were classified as \textbf{True} by the model but are actually \textbf{False} according to the ground truth (this is, code \texttt{<predicted\_label><ground\_truth>}).
 
 \begin{table}[H]
-    \centering
-    \begin{tabular}{lcccc}
-        \toprule
-        \textbf{Configuration}     & \textbf{Accuracy} & \textbf{Parsing Accuracy} & \textbf{Coverage} & \textbf{Avg. Inference Time (s)} \\
-        \midrule
-        Full Cheatsheet            & 0.85              & 0.95                      & 0.90              & 8.5                              \\
-        No Lemma/Heuristic Block   & 0.78              & 0.92                      & 0.88              & 7.2                              \\
-        No Problem-Specific Answer & 0.80              & 0.93                      & 0.89              & 7.8                              \\
-        \bottomrule
-    \end{tabular}
-    \caption{Results of the ablation study on the cheatsheet components.}
-    \label{tab:ablation_results}
+  \centering
+  \begin{tabular}{lcccccccc}
+    \toprule
+    \textbf{Variant} & \textbf{TT} & \textbf{TF} & \textbf{FT} & \textbf{FF} & \textbf{NV} & \textbf{Acc.} & \textbf{Err.} \\
+    \midrule
+    Full Cheatsheet  & 24          & 10          & 1           & 14          & 1           & 0.76          & 0.24          \\
+    No Symbolic True & 22          & 9           & 2           & 17          & 0           & 0.78          & 0.22          \\
+    No Countermodel  & 24          & 10          & 0           & 14          & 2           & 0.76          & 0.24          \\
+    Neither          & 21          & 15          & 4           & 10          & 0           & 0.62          & 0.38          \\
+    Baseline         & 16          & 11          & 9           & 14          & 0           & 0.60          & 0.40          \\
+    \bottomrule
+  \end{tabular}
+  \vspace{0.5em}
+  \caption{Results of the ablation study on the cheatsheet.}
+  \label{fig:ablation_results}
 \end{table}
 
-\section{Discussion}
-
+Some interesting insights from these results are the following:
 \begin{itemize}
-    \item Limitation of our approach (similar to limitations of fine-tuning in comparison to pretraining: Curation of the dataset, computational cost, etc.)
+  \item Removing the symbolic heuristics seems to have a positive impact on the performance of the system, which may simply be an statistical fluctuation due to the small sample size, but it may also be a consequence of the fact that some of the heuristics included in the generated cheatsheet are not actually helpful for solving the problems.
+  \item While removing the individual components (symbolic heuristics and countermodel library) does not seem to have a significant impact on the performance of the system, removing both of them at the same time has a significant negative impact on the performance. This is quite a confusing result, as it may suggest that there is some sort of synergy between the two components.
+  \item The baseline configuration shows a significant drop in performance, which suggests that the generated content in the cheatsheet is indeed contributing to the performance of the system. However, it is worth noting that the baseline configuration still achieves an accuracy of 0.60, which is not negligible and may be due to the fact that the base model (gpt-oss-120b)  has some inherent capabilities for solving this kind of problems, even without the fine-tuning and the generated content in the cheatsheet. This seems reasonable, as it was released in August 2025 and is a large language model pretrained on a wide range of tasks, which may include some mathematical problem-solving capabilities.
+  \item Similar to the results obtained with the complete system, all the configurations show a bias towards classifying problems as \textbf{False}.
 \end{itemize}
 
-\subsection{Limitations and Future Work}
-\label{sec:limitations_future_work}
+All in all, we can conclude that the inclusion of specific heuristics and strategies for solving the problems has a positive impact on the performance of the system (increasing the accuracy by a quarter in comparison to the baseline configuration), but there is still room for improvement, as the system still shows some limitations and biases.
 
 \section{Conclusion}
+
+In this project, we have explored the potential of multi-agent collaboration for enhancing the mathematical problem-solving capabilities of large language models. We proposed a pipeline that integrates six different agents, each specializing in a distinct aspect of mathematical reasoning, to collaboratively solve complex problems related to equational theories. Our results have 4 main implications:
+\begin{itemize}
+  \item The multi-agent system is effective in generating useful information for solving the problems, as evidenced by the improvement in performance when using the generated cheatsheet compared to a baseline configuration.
+  \item This allows for a \textit{cheaper} (in the computational sense) and more efficient way to adjust our models to specific tasks, rather than having to perform expensive reasoning during inference. This advantage is relevant as the greatest part of the processing may be performed offline, which allows us to leverage more powerful models and more computational resources during the training phase, while still being able to deploy the system with a constrained LLM during the evaluation phase.
+  \item LLMs may have some inherent bias that leads them to take actions which may not be the most optimal for solving the problems, as well as taking logical leaps which may not be justified (such as assuming that the absence of a proof is a strong signal of the implication being false). This is an interesting insight that may be worth exploring in future research, as it may have implications for the design of prompts and the development of more effective strategies for guiding the reasoning process of LLMs.
+  \item The generated cheatsheet is not just adding more text; it is providing a better search space for reasoning, which allows the model to have a more structured and informed approach to solving the problems.
+\end{itemize}
 
 \newpage
 
@@ -251,9 +268,6 @@ We have included, in the Appendix \ref{appendix:input_output_examples}, an examp
 \bibliography{references}
 \newpage
 \appendix
-
-\section{Pipeline Example}
-\label{appendix:pipeline_example}
 
 \section{Input/Output Examples}
 \label{appendix:input_output_examples}
@@ -320,9 +334,10 @@ satisfies Eq 2. So the implication holds in all magmas.
 <answer>
 VERDICT: TRUE
 
-REASONING: Eq 1 forces the operation to be a left projection (a * b = a for all a, b).
-In any left‑projection magma the right‑hand side of Eq 2 reduces to x, making Eq 2
-an identity.
+REASONING: Eq 1 forces the operation to be a left projection
+ (a * b = a for all a, b).
+In any left‑projection magma the right‑hand side
+ of Eq 2 reduces to x, making Eq 2 an identity.
 
 PROOF: From Eq 1 set x := a, y := b, z := a to obtain a = a * (b * (a * a)).
 Let c = b * (a * a). Then a = a * c. Varying b shows that for the fixed a,
@@ -331,7 +346,6 @@ is left projection. In such a magma, (x * y) = x and (z * w) = z, so
 ((x * y) * (z * w)) * u = (x * z) * u = x * u = x. Thus Eq 2 holds universally.
 </answer>
 \end{verbatim}
-
 \subsection{Baseline Cheatsheet Execution}
 
 Analogously, the prompt to the LLM in this case is the baseline cheatsheet included in Appendix \ref{appendix:baseline_cheatsheet}, with the fields \texttt{{{  equation1  }}} and \texttt{{{ equation2 }}} filled with the corresponding equations from the problem. The output generated is the following:
@@ -348,7 +362,8 @@ x = ((x * y) * (z * w)) * u
 \]
 fails for some choice of variables.
 
-Take the two-element set \(M = \{0,1\}\) with the binary operation defined by
+Take the two-element set \(M = \{0,1\}\) with 
+ the binary operation defined by
 \[
 a * b =
 \begin{cases}
@@ -373,33 +388,38 @@ x * (y * (x * z)) = x,
 \]
 so Equation~1 is satisfied universally.
 
-However, choosing \(x = 1\), \(y = 0\), \(z = 0\), \(w = 0\), \(u = 0\) gives
+However, choosing \(x = 1\), \(y = 0\), 
+\(z = 0\), \(w = 0\), \(u = 0\) gives
 \[
 ((x * y) * (z * w)) * u
 = ((1 * 0) * (0 * 0)) * 0
 = (0 * 0) * 0
 = 0 \neq 1 = x.
 \]
-So Equation~2 fails. Hence Equation~1 does not imply Equation~2 in all magmas.
+So Equation~2 fails. Hence Equation~1 does 
+not imply Equation~2 in all magmas.
 </think>
 
 <answer>
 \textbf{VERDICT: FALSE}
 
-\textbf{REASONING:} A magma can satisfy the first identity for all elements 
-    while the second identity fails for some substitution, so the implication does not hold universally.
+\textbf{REASONING:} A magma can satisfy the first
+ identity for all elements while the second identity
+ fails for some substitution, so the implication
+ does not hold universally.
 
-\textbf{COUNTEREXAMPLE:} Let \(M = \{0,1\}\) with operation \(a*b = a\) if 
-    \(a=0\) and \(a*b=b\) if \(a=1\). Then \(x = x * (y * (x * z))\) holds
-    for all \(x,y,z \in M\), but 
-    for \(x = 1\), \(y = 0\), \(z = 0\), \(w = 0\), \(u = 0\),
+\textbf{COUNTEREXAMPLE:} Let \(M = \{0,1\}\) with operation
+  \(a*b = a\) if \(a=0\) and \(a*b=b\) if \(a=1\).
+   Then \(x = x * (y * (x * z))\) holds
+    for all \(x,y,z \in M\), but for \(x = 1\),
+    \(y = 0\), \(z = 0\), \(w = 0\), \(u = 0\),
 \[
 ((x * y) * (z * w)) * u = 0 \neq 1 = x.
 \]
 Thus Equation~2 is not forced by Equation~1.
 \end{answer}
 \end{verbatim}
-
+\newpage
 \section{Reproducibility}
 
 \subsection{Problem Execution}
@@ -407,8 +427,8 @@ Thus Equation~2 is not forced by Equation~1.
 
 We used the cheatsheet and its variants to \textit{help} the LLM solve 50 problems. As mentioned in the main text, these were chosen from the test set provided by the competition organizers, with a representative distribution of difficulties (30 normal and 20 hard) and ground truth labels (25 True and 25 False). In order to provide reproducible results, the given problems were, as listed in the \href{https://playground.sair.foundation/playground/mathematics-distillation-challenge-equational-theories-stage1}{SAIR Playground}, the following:
 \begin{itemize}
-    \item \textbf{Normal:} \texttt{problem\_ids} 0-19, 20-27, 30 and 31.
-    \item \textbf{Hard:} \texttt{problem\_ids} 0-2, 6, 7, 12, 22, 23, 26, 27, 33-36, 39-44.
+  \item \textbf{Normal:} \texttt{problem\_ids} 0-19, 20-27, 30 and 31.
+  \item \textbf{Hard:} \texttt{problem\_ids} 0-2, 6, 7, 12, 22, 23, 26, 27, 33-36, 39-44.
 \end{itemize}
 
 \subsection{Baseline Cheatsheet}
@@ -459,25 +479,33 @@ COUNTEREXAMPLE: ...
 The piece removed is the following:
 \begin{verbatim}
     FAST TRUE CHECKS:
-- Eq2 is syntactically identical on both sides, or Eq2 is Eq1 up to side swap and variable renaming.
-- Eq1 rewrites Eq2's left side to its right side by direct substitution instances.
-- Eq1 forces a projection law such as a*b=b or a*b=a, and Eq2 simplifies under that law.
+- Eq2 is syntactically identical on both sides, or Eq2 is Eq1 up
+  to side swap and variable renaming.
+- Eq1 rewrites Eq2's left side to its right side
+  by direct substitution instances.
+- Eq1 forces a projection law such as a*b=b or a*b=a,
+  and Eq2 simplifies under that law.
 \end{verbatim}
-
+\newpage
 \subsection{No countermodel library}
 \label{appendix:no_countermodel_library_cheatsheet}
 
 The piece removed is the following:
 \begin{verbatim}
     COUNTERMODEL FAMILY:
-- Left projection: x*y=x. Any term evaluates to its leftmost leaf.
-- Right projection: x*y=y. Any term evaluates to its rightmost leaf.
-- XOR on {0,1}: x*y=x+y mod 2. A law holds iff each variable has equal parity on both sides.
-- Constant-zero: x*y=0. Useful when Eq1 collapses all compound terms but Eq2 exposes a variable.
+- Left projection: x*y=x. Any term evaluates 
+  to its leftmost leaf.
+- Right projection: x*y=y. Any term evaluates
+  to its rightmost leaf.
+- XOR on {0,1}: x*y=x+y mod 2. A law holds iff
+  each variable has equal parity on both sides.
+- Constant-zero: x*y=0. Useful when Eq1 collapses
+  all compound terms but Eq2 exposes a variable.
 - Left shift mod 3: x*y=x+1 mod 3. Tracks left spine depth.
 - Right shift mod 3: x*y=y+1 mod 3. Tracks right spine depth.
 - Boolean AND/OR on {0,1}. Useful for absorption/idempotence-shaped laws.
-- Near-projections on {0,1,2}: start from x*y=x or x*y=y and perturb one row/column entry.
+- Near-projections on {0,1,2}: start from x*y=x
+  or x*y=y and perturb one row/column entry.
 \end{verbatim}
 
 \end{document}

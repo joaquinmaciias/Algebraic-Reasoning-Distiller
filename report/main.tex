@@ -76,6 +76,10 @@
 \begin{document}
 
 \maketitle
+\vspace{-2em}
+\begin{center}
+  \href{https://github.com/joaquinmaciias/Algebraic-Reasoning-Distiller}{\texttt{GitHub Repository}}
+\end{center}
 
 \begin{abstract}
   This project explores the potential of multi-agent collaboration in enhancing the mathematical problem-solving capabilities of large language models (LLMs). We propose a pipeline that integrates six different agents, each specializing in a distinct aspect of mathematical reasoning, to collaboratively solve complex problems. The agents include a Planner, a Counterexample Generator, a Symbolic Prover, a RAG Retriever, an Aggregator, and a Distiller. Our results show that training and running this agent \textit{offline} can be a powerful way to distill mathematical knowledge into a compact file, which can then be used to solve problems in an \textit{online} setting with a single call to a constrained LLM. This enables any base model to solve complex mathematical problems effectively without the need to perform expensive reasoning during inference.
